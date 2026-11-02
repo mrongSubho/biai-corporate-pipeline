@@ -254,10 +254,25 @@
     }).catch(e => console.log('Action locally cached', e));
   }
 
+  function selectLead(leadId: string) {
+    selectedLeadId = leadId;
+    const lead = displayLeads.find(l => l.id === leadId);
+    if (lead) {
+      const isOverdue = lead.next_followup && lead.next_followup < BENCHMARK_DATE;
+      const daysOverdue = isOverdue && lead.next_followup ? Math.round((new Date(BENCHMARK_DATE).getTime() - new Date(lead.next_followup).getTime()) / 86400000) : 0;
+      if (daysOverdue >= 2) {
+        soundFx.playEmergencyAlert();
+      } else if (daysOverdue === 1 || lead.next_followup === BENCHMARK_DATE) {
+        soundFx.playWarningPing();
+      }
+    }
+  }
+
   function runCopilot(q: string) {
     copilotQuestion = q;
     try {
       copilotResult = executeCopilotQuery(q, leads, BENCHMARK_DATE);
+      soundFx.playNewMessage();
     } catch (err: any) {
       showFeedback('Copilot query error: ' + err.message);
     }
@@ -671,20 +686,23 @@
                         {@const isOverdue = lead.next_followup && lead.next_followup < BENCHMARK_DATE}
                         {@const isDueToday = lead.next_followup === BENCHMARK_DATE}
                         {@const daysOverdue = isOverdue && lead.next_followup ? Math.round((new Date(BENCHMARK_DATE).getTime() - new Date(lead.next_followup).getTime()) / (86400000)) : 0}
-                        {@const urgencyGlowClass = daysOverdue >= 3 
-                          ? 'border-red-500/80 shadow-[0_0_12px_rgba(220,38,38,0.35)] animate-pulse bg-red-50/30 dark:bg-red-950/20' 
-                          : daysOverdue >= 1 
-                            ? 'border-rose-400/80 shadow-[0_0_8px_rgba(225,29,72,0.25)] bg-rose-50/20 dark:bg-rose-950/15'
+                        {@const daysUntilDue = !isOverdue && lead.next_followup ? Math.round((new Date(lead.next_followup).getTime() - new Date(BENCHMARK_DATE).getTime()) / (86400000)) : 99}
+                        {@const urgencyGlowClass = daysOverdue >= 2 
+                          ? 'border-red-600 shadow-[0_0_18px_rgba(220,38,38,0.45)] ring-2 ring-red-500/60 animate-pulse bg-red-50/40 dark:bg-red-950/25' 
+                          : daysOverdue === 1 
+                            ? 'border-rose-500 shadow-[0_0_14px_rgba(225,29,72,0.35)] ring-1 ring-rose-400/50 bg-rose-50/30 dark:bg-rose-950/20'
                             : isDueToday 
-                              ? 'border-orange-500/80 shadow-[0_0_10px_rgba(234,88,12,0.3)] animate-pulse bg-orange-50/30 dark:bg-orange-950/20'
-                              : ''}
+                              ? 'border-orange-500 shadow-[0_0_14px_rgba(234,88,12,0.4)] ring-1 ring-orange-500/60 animate-pulse bg-orange-50/30 dark:bg-orange-950/20'
+                              : daysUntilDue <= 2 
+                                ? 'border-amber-400 shadow-[0_0_10px_rgba(217,119,6,0.25)] ring-1 ring-amber-400/40 bg-amber-50/20 dark:bg-amber-950/10'
+                                : ''}
                         
                         <div 
                           role="button"
                           tabindex="0"
-                          onclick={() => selectedLeadId = lead.id}
-                          onkeydown={(e) => { if (e.key === 'Enter') selectedLeadId = lead.id; }}
-                          class={`group relative w-full text-left p-3 rounded-lg border transition-all duration-200 cursor-pointer hover:-translate-y-0.5 hover:shadow-md ${
+                          onclick={() => selectLead(lead.id)}
+                          onkeydown={(e) => { if (e.key === 'Enter') selectLead(lead.id); }}
+                          class={`group relative w-full text-left p-3.5 rounded-xl border transition-all duration-200 cursor-pointer hover:scale-[1.025] hover:-translate-y-1 hover:shadow-xl hover:z-30 origin-center ${
                             isOverdue ? 'rail-overdue' : 'rail-healthy'
                           } ${urgencyGlowClass} ${
                             isSelected 
