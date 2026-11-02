@@ -254,12 +254,8 @@
     
     <!-- Left: Brand Identity & Workspace Switcher -->
     <div class="flex items-center gap-3">
-      <div class="w-8 h-8 rounded-full bg-orange-600 flex items-center justify-center text-white shrink-0 shadow-sm shadow-orange-600/20" title="Bangladesh Institute of AI">
-        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="9" stroke="white" stroke-width="1.8"/>
-          <path d="M7 12h10M12 7v10M8.5 8.5l7 7M15.5 8.5l-7 7" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
-        </svg>
-      </div>
+      <!-- Official BIAI Circular Woven Emblem -->
+      <img src="/biai-logo.png" alt="Bangladesh Institute of AI" class="w-8 h-8 rounded-full shrink-0 object-contain shadow-xs" />
 
       <div class="flex items-center gap-2">
         <span class="font-bold tracking-[0.25em] text-slate-900 dark:text-white text-sm">B I A I</span>
