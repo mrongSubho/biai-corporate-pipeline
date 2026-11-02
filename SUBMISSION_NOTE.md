@@ -2,8 +2,8 @@
 
 **Candidate:** Subho Mrong  
 **Submission Date:** 2 November 2026  
-**Live Demo (Cloudflare):** `https://biai-corporate-pipeline.pages.dev` *(or worker endpoint)*  
-**Code Repository:** `apps/task2-pipeline`  
+**Live Demo (Cloudflare Workers):** `https://biai-corporate-pipeline.ludobase.workers.dev`  
+**Code Repository:** `https://github.com/mrongSubho/biai-corporate-pipeline`  
 **Loom Walkthrough (4 min 30s):** `[Loom Video URL]`
 
 ---
