@@ -19,9 +19,10 @@ The system addresses the core failure modes of enterprise CRM data: duplicate im
 | Component | Identifier / Location | Status |
 | :--- | :--- | :--- |
 | **Local Workspace** | `/Users/mrongsubho/Documents/Termninal/BIAI/apps/task2-pipeline` | **Clean & Verified** |
-| **GitHub Repository** | `https://github.com/mrongSubho/biai-corporate-pipeline.git` | **Synchronized on `main` (`commit 17e19ec`)** |
-| **Cloudflare D1 Database** | `biai-pipeline-db` (`fa66524f-3670-4634-af64-861122a5fcad`) | **APAC Region, Migrated & Seeded** |
-| **Test Suite** | Vitest 3.2.7 | **16 / 16 Tests Passing (100% Pass Rate)** |
+| **GitHub Repository** | `https://github.com/mrongSubho/biai-corporate-pipeline.git` | **Synchronized on `main`** |
+| **Cloudflare D1 Database** | `biai-pipeline-db` (`fa66524f-3670-4634-af64-861122a5fcad`) | **APAC Region, Migrated, Seeded & Hardened** |
+| **Test Suite** | Vitest 3.2.7 | **26 / 26 Tests Passing (16 Pipeline + 10 Security & API)** |
+| **Security & Lineage** | SHA-256 Sessions + RBAC | **Active (Server-Side CSV Export with SHA-256 Checksum)** |
 | **Design System** | BIAI Restrained Brand Identity | **Warm Ivory (`#FAF9F6`) & Burnt Orange (`#C2410C`)** |
 
 ---

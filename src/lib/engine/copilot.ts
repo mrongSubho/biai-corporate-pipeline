@@ -67,13 +67,8 @@ export function interpretNaturalLanguageQuery(question: string): CopilotQueryAst
     };
   }
 
-  // Default: Filter list matching search query
-  return {
-    intent: 'FILTER_LIST',
-    filters: [],
-    sort: { field: 'deal_value_bdt', direction: 'DESC' },
-    limit: 25
-  };
+  // Explicitly reject unsupported natural language queries
+  throw new Error(`Unsupported copilot query: "${question}". Supported topics include: Proposal stage value, Overdue deals, Garments/Pharma leads, Hygiene anomalies, and High-value deals.`);
 }
 
 export function executeCopilotQuery(

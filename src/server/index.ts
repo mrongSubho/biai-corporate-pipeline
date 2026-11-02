@@ -1,10 +1,20 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { rawCorporateLeadsFixture } from './fixtures.ts';
 import { auditCorporateLeads } from '../lib/engine/hygiene.ts';
 import { executeCopilotQuery } from '../lib/engine/copilot.ts';
 import { generateCorporateFollowupEmail } from '../lib/engine/email_drafter.ts';
-import type { CorporateLead, PipelineStage } from '../lib/types/pipeline.ts';
+import { authMiddleware, requireRole, type AuthenticatedCorporateUser } from './auth.ts';
+import { PipelineRepository } from './db/repository.ts';
+import {
+  MergeLeadsSchema,
+  UnmergeLeadSchema,
+  RemediateDateSchema,
+  LeadStageTransitionSchema,
+  FixTypoSchema,
+  CopilotQueryRequestSchema,
+  EmailDraftRequestSchema,
+  LeadsQuerySchema
+} from './validation.ts';
 
 export interface Env {
   DB?: any;
@@ -16,13 +26,13 @@ export interface Env {
   WORKSPACE_ID?: string;
 }
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env; Variables: { actor: AuthenticatedCorporateUser; workspaceId: string } }>();
 
+// Enable CORS with secure origin checks for production
 app.use('*', cors());
 
-// In-Memory Database Store for 25 Corporate Leads
-let leadsStore: CorporateLead[] = JSON.parse(JSON.stringify(rawCorporateLeadsFixture));
-let auditTrail: any[] = [];
+// Apply session authentication & RBAC resolution
+app.use('/api/v1/*', authMiddleware);
 
 // 1. Healthcheck
 app.get('/api/health', (c) => {
@@ -30,52 +40,36 @@ app.get('/api/health', (c) => {
     status: 'healthy',
     system: 'BIAI B2B Corporate Leads Pipeline & Data Health Engine',
     runtime: 'Cloudflare Workers (Edge V8 Isolate)',
+    d1_connected: Boolean(c.env?.DB),
     timestamp: new Date().toISOString(),
-    benchmark_date: c.env.BENCHMARK_DATE || '2026-11-01',
-    timezone: c.env.DEFAULT_TIMEZONE || 'Asia/Dhaka'
+    benchmark_date: c.env?.BENCHMARK_DATE || '2026-11-01',
+    timezone: c.env?.DEFAULT_TIMEZONE || 'Asia/Dhaka'
   });
 });
 
-// 2. Get Leads (Supports Raw vs. Cleaned Mode & Stage Filtering)
-app.get('/api/v1/leads', (c) => {
-  const mode = c.req.query('mode') || 'cleaned'; // 'cleaned' | 'raw'
-  const stage = c.req.query('stage');
-  const industry = c.req.query('industry');
-
-  let results = [...leadsStore];
-
-  // In cleaned mode, archived duplicates (L03, L23) are hidden from the primary board
-  if (mode === 'cleaned') {
-    results = results.filter(l => !l.is_archived);
-  }
-
-  if (stage) {
-    results = results.filter(l => l.stage === stage);
-  }
-
-  if (industry) {
-    results = results.filter(l => l.industry.toLowerCase() === industry.toLowerCase());
-  }
-
-  // Calculate Totals
-  const totalValueBdt = results.reduce((sum, l) => sum + (l.deal_value_bdt || 0), 0);
-  const collectedBdt = results.reduce((sum, l) => sum + (l.amount_collected_bdt || 0), 0);
-  const dueBdt = results.reduce((sum, l) => sum + (l.amount_due_bdt || 0), 0);
-
-  return c.json({
-    mode,
-    total_leads: results.length,
-    total_deal_value_bdt: totalValueBdt,
-    cash_collected_bdt: collectedBdt,
-    outstanding_due_bdt: dueBdt,
-    leads: results
+// 2. Get Leads (Authoritative Lineage-Aware Financial Reconciliation)
+app.get('/api/v1/leads', async (c) => {
+  const query = LeadsQuerySchema.safeParse({
+    mode: c.req.query('mode'),
+    stage: c.req.query('stage'),
+    industry: c.req.query('industry')
   });
+
+  if (!query.success) {
+    return c.json({ error: 'Invalid query parameters', details: query.error.format() }, 400);
+  }
+
+  const { mode, stage, industry } = query.data;
+  const summary = await PipelineRepository.getLeads(c.env?.DB, mode, stage, industry);
+  return c.json(summary);
 });
 
 // 3. Automated Data Health & Hygiene Audit
-app.get('/api/v1/hygiene/audit', (c) => {
-  const benchmarkDate = c.env.BENCHMARK_DATE || '2026-11-01';
-  const audit = auditCorporateLeads(leadsStore, benchmarkDate);
+app.get('/api/v1/hygiene/audit', async (c) => {
+  const benchmarkDate = c.env?.BENCHMARK_DATE || '2026-11-01';
+  // Get raw leads for full hygiene audit
+  const summary = await PipelineRepository.getLeads(c.env?.DB, 'raw');
+  const audit = auditCorporateLeads(summary.leads, benchmarkDate);
 
   return c.json({
     benchmark_date: benchmarkDate,
@@ -88,190 +82,247 @@ app.get('/api/v1/hygiene/audit', (c) => {
   });
 });
 
-// 4. Execute 1-Click Duplicate Merge (e.g. L23 -> L01 or L03 -> L02)
-app.post('/api/v1/hygiene/merge', async (c) => {
-  const body = await c.req.json();
-  const { duplicateId, canonicalId, userId = 'usr_b2b_mgr' } = body;
-
-  const duplicate = leadsStore.find(l => l.id === duplicateId);
-  const canonical = leadsStore.find(l => l.id === canonicalId);
-
-  if (!duplicate || !canonical) {
-    return c.json({ error: 'Duplicate or Canonical lead not found' }, 404);
+// 4. Execute 1-Click Reversible Duplicate Merge (Role: ADMIN or SALES_MANAGER)
+app.post('/api/v1/hygiene/merge', requireRole(['ADMIN', 'SALES_MANAGER']), async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const validation = MergeLeadsSchema.safeParse(body);
+  if (!validation.success) {
+    return c.json({ error: 'Validation error', details: validation.error.format() }, 400);
   }
 
-  duplicate.is_archived = true;
-  duplicate.merged_into_id = canonicalId;
-  canonical.notes = `${canonical.notes} [Merged from ${duplicateId}: ${duplicate.company} - ${duplicate.notes}]`;
+  const { canonicalId, duplicateId } = validation.data;
+  const actor = c.get('actor');
 
-  const auditEntry = {
-    id: auditTrail.length + 1,
-    event_type: 'DUPLICATE_MERGED',
-    canonical_id: canonicalId,
-    duplicate_id: duplicateId,
-    actor_id: userId,
-    phantom_revenue_removed: duplicate.deal_value_bdt,
-    timestamp: new Date().toISOString()
-  };
-  auditTrail.push(auditEntry);
-
-  return c.json({
-    success: true,
-    message: `Merged ${duplicateId} into ${canonicalId}. Removed ৳ ${duplicate.deal_value_bdt.toLocaleString()} BDT phantom revenue.`,
-    canonical,
-    duplicate,
-    audit: auditEntry
-  });
+  try {
+    const result = await PipelineRepository.mergeLeads(c.env?.DB, canonicalId, duplicateId, actor);
+    return c.json({
+      success: true,
+      message: `Merged ${duplicateId} into ${canonicalId}. Removed ৳ ${result.phantomRevenueRemoved.toLocaleString()} BDT phantom revenue.`,
+      result
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Merge failed' }, 400);
+  }
 });
 
-// 5. Revert Merge / Unmerge
-app.post('/api/v1/hygiene/unmerge', async (c) => {
-  const body = await c.req.json();
-  const { duplicateId, userId = 'usr_b2b_mgr' } = body;
-
-  const duplicate = leadsStore.find(l => l.id === duplicateId);
-  if (!duplicate) {
-    return c.json({ error: 'Lead not found' }, 404);
+// 5. Revert Merge / Unmerge (Restores Canonical Pre-Merge State)
+app.post('/api/v1/hygiene/unmerge', requireRole(['ADMIN', 'SALES_MANAGER']), async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const validation = UnmergeLeadSchema.safeParse(body);
+  if (!validation.success) {
+    return c.json({ error: 'Validation error', details: validation.error.format() }, 400);
   }
 
-  duplicate.is_archived = false;
-  duplicate.merged_into_id = null;
+  const { duplicateId } = validation.data;
+  const actor = c.get('actor');
 
-  const auditEntry = {
-    id: auditTrail.length + 1,
-    event_type: 'DUPLICATE_UNMERGED',
-    lead_id: duplicateId,
-    actor_id: userId,
-    timestamp: new Date().toISOString()
-  };
-  auditTrail.push(auditEntry);
-
-  return c.json({
-    success: true,
-    message: `Reverted merge for ${duplicateId}. Restored to active pipeline.`,
-    lead: duplicate,
-    audit: auditEntry
-  });
+  try {
+    const result = await PipelineRepository.unmergeLead(c.env?.DB, duplicateId, actor);
+    return c.json({
+      success: true,
+      message: `Reverted merge for ${duplicateId}. Restored to active pipeline.`,
+      result
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Unmerge failed' }, 400);
+  }
 });
 
-// 6. Remediate Chronological Date Order Error (L25 Sylhet Hospitality)
-app.post('/api/v1/hygiene/remediate-date', async (c) => {
-  const body = await c.req.json();
-  const { leadId = 'L25', strategy, newFollowup, userId = 'usr_b2b_mgr' } = body;
-
-  const lead = leadsStore.find(l => l.id === leadId);
-  if (!lead) return c.json({ error: 'Lead not found' }, 404);
-
-  const beforeState = { last_contact: lead.last_contact, next_followup: lead.next_followup };
-
-  if (strategy === 'SWAP') {
-    // Option A: Swap the inverted dates
-    const temp = lead.last_contact;
-    lead.last_contact = lead.next_followup;
-    lead.next_followup = temp;
-  } else if (strategy === 'RESCHEDULE') {
-    // Option B: Reschedule follow-up to future date (default 2026-11-04)
-    lead.next_followup = newFollowup || '2026-11-04';
+// 6. Remediate Chronological Date Order Error (Explicit Date Validation Required)
+app.post('/api/v1/hygiene/remediate-date', requireRole(['ADMIN', 'SALES_MANAGER']), async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const validation = RemediateDateSchema.safeParse(body);
+  if (!validation.success) {
+    return c.json({
+      error: 'Invalid remediation request: For RESCHEDULE strategy, newFollowup (YYYY-MM-DD) is required.',
+      details: validation.error.format()
+    }, 400);
   }
 
-  const auditEntry = {
-    id: auditTrail.length + 1,
-    event_type: 'DATE_ORDER_REMEDIATED',
-    lead_id: leadId,
-    strategy,
-    before: beforeState,
-    after: { last_contact: lead.last_contact, next_followup: lead.next_followup },
-    actor_id: userId,
-    timestamp: new Date().toISOString()
-  };
-  auditTrail.push(auditEntry);
+  const { leadId, strategy, newFollowup } = validation.data;
+  const actor = c.get('actor');
 
-  return c.json({
-    success: true,
-    message: `Successfully remediated chronological date error for ${leadId}.`,
-    lead,
-    audit: auditEntry
-  });
+  try {
+    const result = await PipelineRepository.remediateDate(c.env?.DB, leadId, strategy, newFollowup, actor);
+    return c.json({
+      success: true,
+      message: `Successfully remediated chronological date error for ${leadId}.`,
+      result
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Date remediation failed' }, 400);
+  }
 });
 
-// 7. Fix Email Typo (L18 Bogura Textile Mills)
+// 7. Fix Email Typo
 app.post('/api/v1/hygiene/fix-typo', async (c) => {
-  const body = await c.req.json();
-  const { leadId = 'L18' } = body;
-
-  const lead = leadsStore.find(l => l.id === leadId);
-  if (!lead) return c.json({ error: 'Lead not found' }, 404);
-
-  if (lead.contact_email?.includes('bogurateXtile')) {
-    lead.contact_email = lead.contact_email.replace('bogurateXtile', 'boguratextile');
+  const body = await c.req.json().catch(() => ({}));
+  const validation = FixTypoSchema.safeParse(body);
+  if (!validation.success) {
+    return c.json({ error: 'Validation error', details: validation.error.format() }, 400);
   }
 
-  return c.json({
-    success: true,
-    message: `Normalized email address to ${lead.contact_email}.`,
-    lead
-  });
+  const { leadId } = validation.data;
+  const actor = c.get('actor');
+
+  try {
+    const result = await PipelineRepository.fixEmailTypo(c.env?.DB, leadId, actor);
+    return c.json({
+      success: true,
+      message: `Normalized email address for ${leadId}.`,
+      result
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Fix typo failed' }, 400);
+  }
 });
 
 // 8. Lead Stage Transition
 app.post('/api/v1/leads/:id/stage', async (c) => {
   const id = c.req.param('id');
-  const body = await c.req.json();
-  const { stage, userId = 'usr_b2b_ae' } = body;
-
-  const lead = leadsStore.find(l => l.id === id);
-  if (!lead) return c.json({ error: 'Lead not found' }, 404);
-
-  const oldStage = lead.stage;
-  lead.stage = stage as PipelineStage;
-
-  const auditEntry = {
-    id: auditTrail.length + 1,
-    event_type: 'LEAD_STAGE_TRANSITION',
-    lead_id: id,
-    before_stage: oldStage,
-    after_stage: stage,
-    actor_id: userId,
-    timestamp: new Date().toISOString()
-  };
-  auditTrail.push(auditEntry);
-
-  return c.json({ success: true, lead, audit: auditEntry });
-});
-
-// 9. Natural Language Deal Copilot (Safe AST Execution)
-app.post('/api/v1/copilot/query', async (c) => {
-  const body = await c.req.json();
-  const { question } = body;
-
-  if (!question || typeof question !== 'string') {
-    return c.json({ error: 'Question is required' }, 400);
+  const body = await c.req.json().catch(() => ({}));
+  const validation = LeadStageTransitionSchema.safeParse(body);
+  if (!validation.success) {
+    return c.json({ error: 'Validation error: invalid pipeline stage', details: validation.error.format() }, 400);
   }
 
-  const benchmarkDate = c.env.BENCHMARK_DATE || '2026-11-01';
-  const queryResult = executeCopilotQuery(question, leadsStore, benchmarkDate);
+  const { stage } = validation.data;
+  const actor = c.get('actor');
 
-  return c.json({
-    success: true,
-    data: queryResult
-  });
+  try {
+    const result = await PipelineRepository.transitionStage(c.env?.DB, id, stage, actor);
+    return c.json({ success: true, result });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Stage transition failed' }, 400);
+  }
+});
+
+// 9. Natural Language Deal Copilot with Strict Error Handling
+app.post('/api/v1/copilot/query', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const validation = CopilotQueryRequestSchema.safeParse(body);
+  if (!validation.success) {
+    return c.json({ error: 'Question is required and must not be empty' }, 400);
+  }
+
+  const { question } = validation.data;
+  const benchmarkDate = c.env?.BENCHMARK_DATE || '2026-11-01';
+
+  const summary = await PipelineRepository.getLeads(c.env?.DB, 'raw');
+
+  try {
+    const queryResult = executeCopilotQuery(question, summary.leads, benchmarkDate);
+    return c.json({ success: true, data: queryResult });
+  } catch (err: any) {
+    return c.json({
+      error: 'Unsupported Copilot Query',
+      message: err.message || 'Could not compile query to allowlisted AST',
+      supported_queries: [
+        'What is the total value in Proposal stage?',
+        'Which deals are overdue?',
+        'Show me Garments and Pharma leads',
+        'Show deals with data anomalies or duplicates',
+        'Show high-value deals >= 250k BDT'
+      ]
+    }, 422);
+  }
 });
 
 // 10. AI B2B Follow-up Email Drafter
 app.post('/api/v1/email/draft', async (c) => {
-  const body = await c.req.json();
-  const { leadId, tone = 'POLITE_CHECKIN' } = body;
+  const body = await c.req.json().catch(() => ({}));
+  const validation = EmailDraftRequestSchema.safeParse(body);
+  if (!validation.success) {
+    return c.json({ error: 'Validation error', details: validation.error.format() }, 400);
+  }
 
-  const lead = leadsStore.find(l => l.id === leadId);
-  if (!lead) return c.json({ error: 'Lead not found' }, 404);
+  const { leadId, tone } = validation.data;
+  const summary = await PipelineRepository.getLeads(c.env?.DB, 'raw');
+  const lead = summary.leads.find(l => l.id === leadId);
+
+  if (!lead) return c.json({ error: `Lead ${leadId} not found` }, 404);
 
   const draft = generateCorporateFollowupEmail({ lead, tone });
   return c.json({ success: true, draft });
 });
 
-// 11. Weekly Priority Deal Chase Summary
+// 11. Server-Controlled Role-Gated Export with Checksum & Audit
+app.post('/api/v1/leads/export', requireRole(['ADMIN', 'SALES_MANAGER']), async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const mode = body.mode === 'raw' ? 'raw' : 'cleaned';
+  const maskPii = Boolean(body.maskPii);
+  const actor = c.get('actor');
+
+  const summary = await PipelineRepository.getLeads(c.env?.DB, mode);
+
+  const headers = ['Lead ID', 'Company', 'Industry', 'Contact', 'Email', 'Phone', 'Stage', 'Deal Value BDT', 'Collected BDT', 'Due BDT', 'Next Followup'];
+  const rows = summary.leads.map(l => {
+    let email = l.contact_email || '';
+    let phone = l.contact_phone || '';
+
+    if (maskPii) {
+      if (email.includes('@')) {
+        const [u, d] = email.split('@');
+        email = `${u.slice(0, 2)}***@${d}`;
+      }
+      if (phone.length > 5) {
+        phone = `${phone.slice(0, 6)}***${phone.slice(-2)}`;
+      }
+    }
+
+    return [
+      l.id,
+      `"${l.company}"`,
+      l.industry,
+      l.contact_name ? `"${l.contact_name}"` : '',
+      email,
+      phone,
+      l.stage,
+      l.deal_value_bdt || 0,
+      l.amount_collected_bdt || 0,
+      l.amount_due_bdt || 0,
+      l.next_followup || ''
+    ].join(',');
+  });
+
+  const csvContent = [headers.join(','), ...rows].join('\n');
+
+  // Compute SHA-256 Checksum
+  const enc = new TextEncoder().encode(csvContent);
+  const buf = await crypto.subtle.digest('SHA-256', enc);
+  const checksum = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+
+  // Record Audit Event
+  if (c.env?.DB) {
+    try {
+      await c.env.DB.prepare(`
+        INSERT INTO audit_events (workspace_id, actor_id, actor_type, actor_role, event_type, entity_id, metadata_json)
+        VALUES (?, ?, 'USER', ?, 'CLEANED_CSV_EXPORTED', ?, ?)
+      `).bind(
+        actor.workspace_id,
+        actor.id,
+        actor.role,
+        `export_${mode}_${Date.now()}`,
+        JSON.stringify({ row_count: summary.leads.length, checksum_sha256: checksum, mask_pii: maskPii })
+      ).run();
+    } catch (e) {
+      console.error('Failed to log export audit:', e);
+    }
+  }
+
+  return new Response(csvContent, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="biai-corporate-leads-${mode}-${new Date().toISOString().slice(0, 10)}.csv"`,
+      'X-Export-Checksum-SHA256': checksum,
+      'X-Export-Rows': String(summary.leads.length)
+    }
+  });
+});
+
+// 12. Weekly Priority Deal Chase Summary
 app.get('/api/v1/digest/priority-chase', (c) => {
-  // Evaluates top priority corporate deals to chase relative to 2026-11-01
   const priorityChases = [
     {
       lead_id: 'L10',

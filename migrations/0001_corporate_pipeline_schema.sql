@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL,
     expires_at TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -43,6 +44,8 @@ CREATE TABLE IF NOT EXISTS imports (
     imported_by TEXT NOT NULL REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_imports_hash ON imports(workspace_id, file_hash_sha256);
 
 -- 4. Immutable Raw Leads (Verbatim Source Data)
 CREATE TABLE IF NOT EXISTS raw_leads (
@@ -61,10 +64,24 @@ CREATE TABLE IF NOT EXISTS raw_leads (
     last_contact_raw TEXT,
     next_followup_raw TEXT,
     notes_raw TEXT,
+    row_hash_sha256 TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_raw_leads_csv_id ON raw_leads(lead_id_csv);
+
+-- Immutability Triggers for raw_leads
+CREATE TRIGGER IF NOT EXISTS trg_raw_leads_no_update
+BEFORE UPDATE ON raw_leads
+BEGIN
+    SELECT RAISE(FAIL, 'raw_leads is immutable and cannot be updated');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_raw_leads_no_delete
+BEFORE DELETE ON raw_leads
+BEGIN
+    SELECT RAISE(FAIL, 'raw_leads is immutable and cannot be deleted');
+END;
 
 -- 5. Canonical Operational Leads (Cleaned Working Entity)
 CREATE TABLE IF NOT EXISTS canonical_leads (
@@ -142,6 +159,7 @@ CREATE TABLE IF NOT EXISTS merge_decisions (
     duplicate_lead_id TEXT NOT NULL REFERENCES canonical_leads(id),
     match_confidence REAL NOT NULL,
     survivorship_policy_json TEXT NOT NULL,
+    before_state_snapshot_json TEXT,
     merged_by TEXT NOT NULL REFERENCES users(id),
     can_revert INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -171,6 +189,7 @@ CREATE TABLE IF NOT EXISTS audit_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     workspace_id TEXT NOT NULL,
     actor_id TEXT NOT NULL,
+    actor_type TEXT NOT NULL DEFAULT 'USER' CHECK (actor_type IN ('USER', 'SYSTEM', 'WEBHOOK')),
     actor_role TEXT NOT NULL,
     event_type TEXT NOT NULL CHECK (event_type IN (
         'LEAD_STAGE_TRANSITION',
@@ -187,3 +206,16 @@ CREATE TABLE IF NOT EXISTS audit_events (
     metadata_json TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Immutability Triggers for audit_events (Append-Only)
+CREATE TRIGGER IF NOT EXISTS trg_audit_events_no_update
+BEFORE UPDATE ON audit_events
+BEGIN
+    SELECT RAISE(FAIL, 'audit_events is append-only and cannot be updated');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_audit_events_no_delete
+BEFORE DELETE ON audit_events
+BEGIN
+    SELECT RAISE(FAIL, 'audit_events is append-only and cannot be deleted');
+END;

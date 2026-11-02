@@ -57,6 +57,16 @@
       document.documentElement.classList.remove('dark');
     }
 
+    // Fetch authoritative leads from D1 backend with local fallback
+    fetch('/api/v1/leads?mode=raw')
+      .then(r => r.ok ? r.json() : null)
+      .then(res => {
+        if (res?.leads && Array.isArray(res.leads) && res.leads.length > 0) {
+          leads = res.leads;
+        }
+      })
+      .catch(e => console.log('Standalone mode: using seeded pipeline fixture', e));
+
     const handleKeydown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
@@ -170,6 +180,11 @@
   function transitionStage(leadId: string, newStage: PipelineStage) {
     leads = leads.map(l => l.id === leadId ? { ...l, stage: newStage } : l);
     showFeedback(`Stage updated to ${newStage}`);
+    fetch(`/api/v1/leads/${leadId}/stage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage: newStage })
+    }).catch(e => console.log('Action locally cached', e));
   }
 
   function mergeDuplicate(duplicateId: string, canonicalId: string) {
@@ -184,27 +199,43 @@
     });
     soundFx.playActionSuccess();
     showFeedback(`Archived duplicate ${duplicateId} into canonical lead ${canonicalId}`);
+    fetch('/api/v1/hygiene/merge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ canonicalId, duplicateId })
+    }).catch(e => console.log('Action locally cached', e));
   }
 
   function unmergeDuplicate(duplicateId: string) {
     leads = leads.map(l => l.id === duplicateId ? { ...l, is_archived: false, merged_into_id: null } : l);
     soundFx.playActionSuccess();
     showFeedback(`Restored ${duplicateId} as independent lead`);
+    fetch('/api/v1/hygiene/unmerge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ duplicateId })
+    }).catch(e => console.log('Action locally cached', e));
   }
 
   function remediateDateOrder(leadId: string, strategy: 'SWAP' | 'RESCHEDULE') {
+    const newFollowup = '2026-11-04';
     leads = leads.map(l => {
       if (l.id === leadId) {
         if (strategy === 'SWAP') {
           return { ...l, last_contact: l.next_followup, next_followup: l.last_contact };
         } else {
-          return { ...l, next_followup: '2026-11-04' };
+          return { ...l, next_followup: newFollowup };
         }
       }
       return l;
     });
     soundFx.playActionSuccess();
     showFeedback(`Remediated date inversion on ${leadId} via ${strategy}`);
+    fetch('/api/v1/hygiene/remediate-date', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ leadId, strategy, newFollowup })
+    }).catch(e => console.log('Action locally cached', e));
   }
 
   function fixEmailTypo(leadId: string) {
@@ -216,11 +247,20 @@
     });
     soundFx.playActionSuccess();
     showFeedback(`Normalized email typo for ${leadId}`);
+    fetch('/api/v1/hygiene/fix-typo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ leadId })
+    }).catch(e => console.log('Action locally cached', e));
   }
 
   function runCopilot(q: string) {
     copilotQuestion = q;
-    copilotResult = executeCopilotQuery(q, leads, BENCHMARK_DATE);
+    try {
+      copilotResult = executeCopilotQuery(q, leads, BENCHMARK_DATE);
+    } catch (err: any) {
+      showFeedback('Copilot query error: ' + err.message);
+    }
   }
 
   function copyText(txt: string, label: string) {
@@ -233,7 +273,31 @@
     setTimeout(() => { feedbackMessage = null; }, 2500);
   }
 
-  function exportCleanedCsv() {
+  async function exportCleanedCsv() {
+    try {
+      // 1. Attempt Server-Side Audited Export
+      const res = await fetch('/api/v1/leads/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: viewMode, maskPii: false })
+      });
+
+      if (res.ok) {
+        const checksum = res.headers.get('X-Export-Checksum-SHA256');
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `biai-corporate-leads-${viewMode}-${BENCHMARK_DATE}.csv`;
+        a.click();
+        showFeedback(`Exported ${displayLeads.length} leads (SHA-256: ${checksum?.slice(0, 8)}...)`);
+        return;
+      }
+    } catch (e) {
+      console.log('Falling back to browser CSV download', e);
+    }
+
+    // 2. Client-side fallback if server offline
     const headers = ['Lead ID', 'Company', 'Industry', 'Contact', 'Email', 'Phone', 'Stage', 'Deal Value BDT', 'Collected BDT', 'Due BDT', 'Next Followup'];
     const rows = displayLeads.map(l => [
       l.id,
