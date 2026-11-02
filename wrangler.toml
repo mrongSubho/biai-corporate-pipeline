@@ -1,0 +1,23 @@
+name = "biai-corporate-pipeline"
+main = "src/server/index.ts"
+compatibility_date = "2026-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "biai-pipeline-db"
+database_id = "local-biai-pipeline-db-id"
+migrations_dir = "./migrations"
+
+[ai]
+binding = "AI"
+
+[vars]
+ENVIRONMENT = "development"
+DEFAULT_TIMEZONE = "Asia/Dhaka"
+BENCHMARK_DATE = "2026-11-01"
+WORKSPACE_ID = "ws_biai_b2b"
