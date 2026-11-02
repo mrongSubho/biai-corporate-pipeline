@@ -4,6 +4,7 @@
   import { auditCorporateLeads } from '../lib/engine/hygiene';
   import { executeCopilotQuery } from '../lib/engine/copilot';
   import { generateCorporateFollowupEmail, type EmailDraftResult } from '../lib/engine/email_drafter';
+  import { soundFx } from '../lib/audio/sound_fx.ts';
   import type { CorporateLead, PipelineStage, AnomalyFinding } from '../lib/types/pipeline';
 
   // --- INITIALIZE LEADS WITH CLEANED DEFAULTS ---
@@ -41,6 +42,7 @@
   let bankConfirmed = $state(false);
   let feedbackMessage = $state<string | null>(null);
   let maskPiiOnExport = $state(false);
+  let audioEnabled = $state(soundFx.enabled);
 
   // Initialize theme from DOM & localStorage
   onMount(() => {
@@ -78,6 +80,15 @@
       document.documentElement.classList.add('light');
       document.documentElement.classList.remove('dark');
       localStorage.setItem('theme', 'light');
+    }
+  }
+
+  function toggleAudio() {
+    audioEnabled = soundFx.toggle();
+    if (audioEnabled) {
+      showFeedback('🔊 Audio FX enabled (Web Audio synthesized)');
+    } else {
+      showFeedback('🔇 Audio FX muted');
     }
   }
 
@@ -171,11 +182,13 @@
       }
       return l;
     });
+    soundFx.playActionSuccess();
     showFeedback(`Archived duplicate ${duplicateId} into canonical lead ${canonicalId}`);
   }
 
   function unmergeDuplicate(duplicateId: string) {
     leads = leads.map(l => l.id === duplicateId ? { ...l, is_archived: false, merged_into_id: null } : l);
+    soundFx.playActionSuccess();
     showFeedback(`Restored ${duplicateId} as independent lead`);
   }
 
@@ -190,6 +203,7 @@
       }
       return l;
     });
+    soundFx.playActionSuccess();
     showFeedback(`Remediated date inversion on ${leadId} via ${strategy}`);
   }
 
@@ -200,6 +214,7 @@
       }
       return l;
     });
+    soundFx.playActionSuccess();
     showFeedback(`Normalized email typo for ${leadId}`);
   }
 
@@ -248,37 +263,53 @@
 <div class="h-screen w-screen flex flex-col overflow-hidden bg-warm-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 font-sans selection:bg-orange-600 selection:text-white">
 
   <!-- ======================================================== -->
-  <!-- 1. TOP HEADER (QUIETLY CONFIDENT BIAI ENTERPRISE BAR)    -->
+  <!-- 1. TOP HEADER (AUTHENTIC BIAI ECOSYSTEM HEADER)          -->
   <!-- ======================================================== -->
-  <header class="h-14 border-b border-warm-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/90 backdrop-blur px-4 flex items-center justify-between gap-4 shrink-0 z-30">
+  <header class="h-14 border-b border-warm-200 dark:border-slate-800 bg-[#FAF9F6] dark:bg-[#080C14] px-4 flex items-center justify-between gap-4 shrink-0 z-30 transition-colors">
     
-    <!-- Left: Brand Identity & Workspace Switcher -->
-    <div class="flex items-center gap-3">
-      <!-- Official BIAI Circular Woven Emblem -->
-      <img src="/biai-logo.png" alt="Bangladesh Institute of AI" class="w-8 h-8 rounded-full shrink-0 object-contain shadow-xs" />
+    <!-- Left: Authentic BIAI Brand Identity & Ecosystem Navigation -->
+    <div class="flex items-center gap-5">
+      <!-- Official BIAI Circular Woven Emblem & Spaced Wordmark -->
+      <a href="https://biai.com.bd" target="_blank" rel="noopener noreferrer" class="flex items-center gap-2.5 group">
+        <img src="/biai-logo.png" alt="Bangladesh Institute of AI" class="w-8 h-8 rounded-full shrink-0 object-contain shadow-xs transition group-hover:scale-105" />
+        <span class="font-bold tracking-[0.3em] text-slate-900 dark:text-white text-base">B I A I</span>
+      </a>
 
-      <div class="flex items-center gap-2">
-        <span class="font-bold tracking-[0.25em] text-slate-900 dark:text-white text-sm">B I A I</span>
-        <span class="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-warm-100 text-warm-800 border border-warm-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
-          Corporate Pipeline
+      <!-- Ecosystem Workspace Navigation Links (Styled to match biai.com.bd navbar) -->
+      <nav class="hidden md:flex items-center gap-1 text-xs font-medium">
+        <!-- Switch to Task 1 CRM Triage -->
+        <a 
+          href="/" 
+          title="Switch to CRM Triage workspace"
+          class="py-4 px-3 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition">
+          CRM Triage
+        </a>
+
+        <!-- Active Corporate Pipeline link with authentic BIAI bottom underline bar -->
+        <span class="relative py-4 px-3 font-semibold text-orange-600 dark:text-orange-400 flex items-center gap-1.5 cursor-default">
+          <span>Corporate Pipeline</span>
+          <span class="absolute bottom-0 left-2 right-2 h-0.5 bg-orange-600 dark:bg-orange-500 rounded-full"></span>
         </span>
-      </div>
 
-      <div class="h-4 w-[1px] bg-warm-200 dark:bg-slate-800 mx-1"></div>
+        <!-- External BIAI Portals directly from biai.com.bd -->
+        <a 
+          href="https://biai.com.bd/courses" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          class="py-4 px-3 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition flex items-center gap-1">
+          <span>Courses</span>
+          <svg class="w-2.5 h-2.5 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+        </a>
 
-      <!-- Dataset Lineage Segmented Control (Raw vs Cleaned) -->
-      <div class="flex items-center bg-warm-100 dark:bg-slate-800 p-0.5 rounded-lg text-xs font-medium border border-warm-200 dark:border-slate-700">
-        <button 
-          onclick={() => viewMode = 'cleaned'}
-          class={`px-3 py-1 rounded-md transition ${viewMode === 'cleaned' ? 'bg-white dark:bg-slate-900 text-orange-700 dark:text-orange-400 font-bold shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}>
-          Cleaned Verified (23)
-        </button>
-        <button 
-          onclick={() => viewMode = 'raw'}
-          class={`px-3 py-1 rounded-md transition ${viewMode === 'raw' ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-400 font-bold shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}>
-          Raw Imported (25)
-        </button>
-      </div>
+        <a 
+          href="https://biai.com.bd" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          class="py-4 px-3 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition flex items-center gap-1">
+          <span>For Business</span>
+          <svg class="w-2.5 h-2.5 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+        </a>
+      </nav>
     </div>
 
     <!-- Center: Global Search (Cmd+K) -->
@@ -292,7 +323,7 @@
         type="text" 
         bind:value={searchQuery}
         placeholder="Search company, contact, phone, lead ID...  ⌘K"
-        class="w-full text-xs pl-9 pr-14 py-1.5 rounded-lg border border-warm-200 dark:border-slate-800 bg-warm-50/70 dark:bg-slate-950/70 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-orange-600 transition"
+        class="w-full text-xs pl-9 pr-14 py-1.5 rounded-lg border border-warm-200 dark:border-slate-800 bg-white/70 dark:bg-slate-950/70 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-orange-600 transition"
       />
       {#if searchQuery}
         <button 
@@ -305,6 +336,33 @@
 
     <!-- Right: Utility Controls & Primary Action -->
     <div class="flex items-center gap-2">
+      <!-- Audio FX Toggle Button -->
+      <button 
+        onclick={toggleAudio}
+        aria-label="Toggle audio effects"
+        title={audioEnabled ? 'Audio FX Enabled (Click to Mute)' : 'Audio FX Muted (Click to Unmute)'}
+        class="text-xs p-1.5 rounded flex items-center gap-1 text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white hover:bg-warm-100 dark:hover:bg-slate-800 transition">
+        {#if audioEnabled}
+          <span class="text-emerald-600 dark:text-emerald-400 font-mono text-sm" title="Audio On">🔊</span>
+        {:else}
+          <span class="text-slate-400 font-mono text-sm" title="Audio Muted">🔇</span>
+        {/if}
+      </button>
+
+      <!-- Dataset Lineage Segmented Control (Raw vs Cleaned) -->
+      <div class="flex items-center bg-warm-100 dark:bg-slate-800 p-0.5 rounded-lg text-xs font-medium border border-warm-200 dark:border-slate-700">
+        <button 
+          onclick={() => viewMode = 'cleaned'}
+          class={`px-2.5 py-1 rounded-md transition ${viewMode === 'cleaned' ? 'bg-white dark:bg-slate-900 text-orange-700 dark:text-orange-400 font-bold shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}>
+          Cleaned (23)
+        </button>
+        <button 
+          onclick={() => viewMode = 'raw'}
+          class={`px-2.5 py-1 rounded-md transition ${viewMode === 'raw' ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-400 font-bold shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}>
+          Raw (25)
+        </button>
+      </div>
+
       <!-- Benchmark Date Badge -->
       <span class="text-[11px] font-mono text-slate-500 bg-warm-100 dark:bg-slate-800 px-2 py-1 rounded border border-warm-200 dark:border-slate-700">
         Benchmark: 2026-11-01
@@ -330,10 +388,10 @@
         {/if}
       </button>
 
-      <!-- Primary Copilot Trigger -->
+      <!-- Primary Copilot Trigger (Authentic BIAI Orange Pill) -->
       <button 
         onclick={() => activeTab = 'copilot'}
-        class="text-xs font-semibold bg-orange-600 hover:bg-orange-500 text-white px-3.5 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm shadow-orange-600/20 active:scale-[0.98] transition">
+        class="text-xs font-semibold bg-[#C2410C] hover:bg-[#EA580C] text-white px-4 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm hover:shadow-orange-600/30 active:scale-[0.98] transition">
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
         <span>Deal Copilot</span>
       </button>
@@ -547,24 +605,38 @@
                       {#each stageLeads as lead (lead.id)}
                         {@const isSelected = selectedLead && selectedLead.id === lead.id}
                         {@const isOverdue = lead.next_followup && lead.next_followup < BENCHMARK_DATE}
+                        {@const isDueToday = lead.next_followup === BENCHMARK_DATE}
+                        {@const daysOverdue = isOverdue && lead.next_followup ? Math.round((new Date(BENCHMARK_DATE).getTime() - new Date(lead.next_followup).getTime()) / (86400000)) : 0}
+                        {@const urgencyGlowClass = daysOverdue >= 3 
+                          ? 'border-red-500/80 shadow-[0_0_12px_rgba(220,38,38,0.35)] animate-pulse bg-red-50/30 dark:bg-red-950/20' 
+                          : daysOverdue >= 1 
+                            ? 'border-rose-400/80 shadow-[0_0_8px_rgba(225,29,72,0.25)] bg-rose-50/20 dark:bg-rose-950/15'
+                            : isDueToday 
+                              ? 'border-orange-500/80 shadow-[0_0_10px_rgba(234,88,12,0.3)] animate-pulse bg-orange-50/30 dark:bg-orange-950/20'
+                              : ''}
                         
                         <div 
                           role="button"
                           tabindex="0"
                           onclick={() => selectedLeadId = lead.id}
                           onkeydown={(e) => { if (e.key === 'Enter') selectedLeadId = lead.id; }}
-                          class={`w-full text-left p-3 rounded-lg border transition duration-150 cursor-pointer ${
+                          class={`group relative w-full text-left p-3 rounded-lg border transition-all duration-200 cursor-pointer hover:-translate-y-0.5 hover:shadow-md ${
                             isOverdue ? 'rail-overdue' : 'rail-healthy'
-                          } ${
+                          } ${urgencyGlowClass} ${
                             isSelected 
-                              ? 'bg-orange-50/70 border-orange-300 dark:bg-orange-950/20 dark:border-orange-800 shadow-sm' 
-                              : 'bg-white hover:bg-warm-100/60 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-850'
+                              ? 'bg-orange-50/80 border-orange-400 dark:bg-orange-950/30 dark:border-orange-700 shadow-sm' 
+                              : 'bg-white hover:bg-warm-100/70 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-850'
                           }`}>
                           
                           <div class="flex items-start justify-between gap-1">
-                            <span class="font-semibold text-xs text-slate-900 dark:text-white truncate">
-                              {lead.company}
-                            </span>
+                            <div class="truncate">
+                              <span class="font-semibold text-xs text-slate-900 dark:text-white truncate">
+                                {lead.company}
+                              </span>
+                              {#if daysOverdue >= 3}
+                                <span class="w-1.5 h-1.5 rounded-full bg-red-500 inline-block ml-1 animate-ping"></span>
+                              {/if}
+                            </div>
                             <span class="font-mono text-xs font-semibold text-emerald-700 dark:text-emerald-400 shrink-0">
                               ৳ {(lead.deal_value_bdt || 0).toLocaleString()}
                             </span>
@@ -574,11 +646,29 @@
                             {lead.contact_name || 'Missing contact'} · {lead.industry}
                           </div>
 
+                          <!-- Dynamic Hover Metadata Peek: reveals contact & prompt on hover -->
+                          <div class="hidden group-hover:flex flex-col gap-1 text-[11px] py-1.5 px-2 my-2 rounded bg-warm-100/90 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border border-warm-200 dark:border-slate-700/60 transition-all">
+                            <div class="flex items-center justify-between font-mono text-[10px]">
+                              <span>{lead.contact_phone || 'No phone'}</span>
+                              <span class="truncate max-w-[130px]">{lead.contact_email || 'No email'}</span>
+                            </div>
+                            {#if lead.notes}
+                              <p class="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-2 italic">
+                                "{lead.notes}"
+                              </p>
+                            {/if}
+                            <span class="text-[10px] text-orange-600 dark:text-orange-400 font-medium">Inspect Deal Studio ↵</span>
+                          </div>
+
                           <!-- Next Followup Pill -->
                           <div class="flex items-center justify-between text-[10px] mt-2 pt-1 border-t border-warm-100 dark:border-slate-800 font-mono">
                             <span class="text-slate-400">Due: {lead.next_followup || 'No date'}</span>
-                            {#if isOverdue}
-                              <span class="text-rose-700 dark:text-rose-300 font-bold">⚠️ Overdue</span>
+                            {#if daysOverdue >= 3}
+                              <span class="px-1.5 py-0.2 rounded font-bold bg-rose-600 text-white">⚠️ Overdue {daysOverdue}d</span>
+                            {:else if daysOverdue >= 1}
+                              <span class="text-rose-700 dark:text-rose-300 font-semibold">Overdue {daysOverdue}d</span>
+                            {:else if isDueToday}
+                              <span class="px-1.5 py-0.2 rounded font-bold bg-orange-500 text-white animate-pulse">Due Today</span>
                             {:else}
                               <span class="text-slate-500">In SLA</span>
                             {/if}
