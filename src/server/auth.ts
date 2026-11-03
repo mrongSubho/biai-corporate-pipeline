@@ -60,6 +60,53 @@ export function hasMinimumTier(userTier: SecurityTier, requiredTier: SecurityTie
   return TIER_HIERARCHY[userTier] <= TIER_HIERARCHY[requiredTier];
 }
 
+/**
+ * Strict Hierarchy Guard: determines whether an actor can manage (edit, change tier/role,
+ * reset password, freeze/suspend, or deactivate) a target user.
+ * - TIER_0 (PLATFORM_OWNER) can manage all lower tiers and peers (except cannot suspend self or demote last owner).
+ * - TIER_1 (OPERATIONS_ADMIN) can ONLY manage lower tiers (TIER_2, TIER_3, TIER_4).
+ *   Cannot manage peer TIER_1 or TIER_0.
+ * - requestedTier: if specified, actor must be authorized to assign it.
+ */
+export function canManageTarget(
+  actor: AuthenticatedUser,
+  targetUser: { id: string; security_tier: SecurityTier; role: UserRole },
+  requestedTier?: SecurityTier
+): { allowed: boolean; reason?: string } {
+  const actorTierNum = TIER_HIERARCHY[actor.security_tier];
+  const targetTierNum = TIER_HIERARCHY[targetUser.security_tier];
+
+  // Self management restrictions for destructive / elevation actions via admin API
+  if (actor.id === targetUser.id) {
+    return { allowed: false, reason: 'Cannot perform administrative tier or status changes on own account' };
+  }
+
+  // TIER_0 (PLATFORM_OWNER) authority
+  if (actor.security_tier === 'TIER_0') {
+    return { allowed: true };
+  }
+
+  // TIER_1 (OPERATIONS_ADMIN) authority:
+  // Must be strictly higher rank (lower numeric index) than target
+  if (actor.security_tier === 'TIER_1') {
+    if (targetTierNum <= 1) {
+      return {
+        allowed: false,
+        reason: 'Operations Administrator can only manage lower-tier operators (TIER_2, TIER_3, TIER_4)'
+      };
+    }
+    if (requestedTier && TIER_HIERARCHY[requestedTier] <= 1) {
+      return {
+        allowed: false,
+        reason: 'Operations Administrator cannot assign TIER_0 or TIER_1'
+      };
+    }
+    return { allowed: true };
+  }
+
+  return { allowed: false, reason: 'Insufficient security tier for user administration' };
+}
+
 export async function hashToken(token: string): Promise<string> {
   return sha256(token);
 }
@@ -85,6 +132,27 @@ export const SEEDED_PIPELINE_USERS: Record<string, AuthenticatedUser> = {
       'AUDIT_READ',
       'USER_PROVISION',
       'SECURITY_ADMIN'
+    ],
+    reauthenticated_at: new Date().toISOString()
+  },
+  'usr_b2b_ops': {
+    id: 'usr_b2b_ops',
+    workspace_id: 'ws_biai_b2b',
+    email: 'opsadmin@biai.com.bd',
+    full_name: 'Tariqul Islam',
+    department: 'Operations',
+    role: 'OPERATIONS_ADMIN',
+    security_tier: 'TIER_1',
+    status: 'ACTIVE',
+    scopes: [
+      'PIPELINE_READ',
+      'PIPELINE_REMEDIATE',
+      'PIPELINE_MERGE',
+      'PIPELINE_EMAIL_APPROVE',
+      'PIPELINE_EMAIL_DISPATCH',
+      'PIPELINE_EXPORT',
+      'AUDIT_READ',
+      'USER_PROVISION'
     ],
     reauthenticated_at: new Date().toISOString()
   },
@@ -243,8 +311,10 @@ export function createAuthMiddleware(appKey: 'CRM' | 'PIPELINE' = 'PIPELINE'): M
 
       // 2. Non-production testing tokens
       if (!actor && !isProduction) {
-        if (tokenInfo.token === 'admin-token' || tokenHash === '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918') {
+        if (tokenInfo.token === 'admin-token' || tokenInfo.token === 'owner-token' || tokenHash === '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918') {
           actor = { ...SEEDED_PIPELINE_USERS['usr_b2b_admin'], is_cookie_session: tokenInfo.isCookie };
+        } else if (tokenInfo.token === 'ops-token') {
+          actor = { ...SEEDED_PIPELINE_USERS['usr_b2b_ops'], is_cookie_session: tokenInfo.isCookie };
         } else if (tokenInfo.token === 'mgr-token' || tokenInfo.token === 'sup-token' || tokenHash === '04f8996da763b7a969b1028ee3007569eaf3a635486ddab211d512c85b9df8fb') {
           actor = { ...SEEDED_PIPELINE_USERS['usr_b2b_mgr'], is_cookie_session: tokenInfo.isCookie };
         } else if (tokenInfo.token === 'ae-token' || tokenInfo.token === 'rep-token' || tokenHash === '4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce') {

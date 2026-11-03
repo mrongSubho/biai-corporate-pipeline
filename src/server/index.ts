@@ -13,6 +13,7 @@ import {
   type AuthenticatedCorporateUser
 } from './auth.js';
 import { AuthService } from './auth_service.js';
+import { MessagingService } from './messaging_service.js';
 import { PipelineRepository } from './db/repository.js';
 import {
   MergeLeadsSchema,
@@ -81,6 +82,10 @@ app.use('/api/auth/logout', authMiddleware);
 app.use('/api/auth/reauthenticate', authMiddleware);
 app.use('/api/auth/mfa/*', authMiddleware);
 app.use('/api/auth/password/change', authMiddleware);
+app.use('/api/auth/profile', authMiddleware);
+app.use('/api/auth/sessions', authMiddleware);
+app.use('/api/auth/sessions/*', authMiddleware);
+app.use('/api/auth/activity', authMiddleware);
 
 // ============================================================================
 // SYSTEM HEALTHCHECK
@@ -237,6 +242,45 @@ app.post('/api/auth/password/change', requireReauth(10), async (c) => {
   return c.json(result.data, 200);
 });
 
+// PATCH /api/auth/profile: Self-service update own profile
+app.patch('/api/auth/profile', async (c) => {
+  const actor = c.get('actor');
+  const body = await c.req.json().catch(() => ({}));
+  const authService = new AuthService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await authService.updateProfile(actor.id, {
+    fullName: body.fullName,
+    department: body.department
+  });
+  if (!result.success) {
+    return c.json({ error: result.error }, result.status as any);
+  }
+  return c.json(result.data, 200);
+});
+
+// GET /api/auth/sessions: Self-service list active sessions
+app.get('/api/auth/sessions', async (c) => {
+  const actor = c.get('actor');
+  const authService = new AuthService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await authService.listSessions(actor.id, actor.session_id_hash);
+  return c.json(result.data, 200);
+});
+
+// POST /api/auth/sessions/revoke-others: Revoke all other sessions
+app.post('/api/auth/sessions/revoke-others', async (c) => {
+  const actor = c.get('actor');
+  const authService = new AuthService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await authService.revokeOtherSessions(actor.id, actor.session_id_hash || '');
+  return c.json(result.data, 200);
+});
+
+// GET /api/auth/activity: Self-service user security activity
+app.get('/api/auth/activity', async (c) => {
+  const actor = c.get('actor');
+  const authService = new AuthService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await authService.getUserActivity(actor.id);
+  return c.json(result.data, 200);
+});
+
 // POST /api/auth/invitations
 app.post('/api/auth/invitations', authMiddleware, requireTier('TIER_1'), requireReauth(10), async (c) => {
   const actor = c.get('actor');
@@ -303,40 +347,163 @@ app.post('/api/auth/bootstrap-owner', async (c) => {
 });
 
 // ============================================================================
-// ADMINISTRATIVE USER MANAGEMENT (TIER_0 / TIER_1)
+// ADMINISTRATIVE USER & ACCESS CONTROL PLANE (TIER_0 / TIER_1)
 // ============================================================================
+
+// GET /api/admin/users: Enriched directory with scopes, active session counts & permissions
 app.get('/api/admin/users', requireTier('TIER_1'), async (c) => {
   const actor = c.get('actor');
-  if (!c.env?.DB) return c.json({ users: [] });
-
-  const rows = await c.env.DB.prepare(`
-    SELECT id, workspace_id, email, full_name, department, role, security_tier, status, failed_login_count, locked_until, last_login_at, created_at
-    FROM users
-    WHERE workspace_id = ?
-    ORDER BY created_at DESC
-  `).bind(actor.workspace_id).all();
-
-  return c.json({ success: true, users: rows.results || [] });
+  const authService = new AuthService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await authService.listUsers(actor);
+  if (!result.success) {
+    return c.json({ error: result.error }, result.status as any);
+  }
+  return c.json(result.data, 200);
 });
 
-app.post('/api/admin/users/:id/suspend', requireTier('TIER_0'), requireReauth(10), async (c) => {
-  const targetId = c.req.param('id');
-  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 503);
+// POST /api/admin/users: Create new active user or tokenized invitation
+app.post('/api/admin/users', requireTier('TIER_1'), async (c) => {
+  const actor = c.get('actor');
+  const body = await c.req.json().catch(() => ({}));
+  const { email, fullName, department, role, securityTier, scopes } = body;
+  const password = body.password || body.tempPassword;
+  const mustChangePassword = body.mustChangePassword !== undefined ? !!body.mustChangePassword : true;
 
-  await c.env.DB.batch([
-    c.env.DB.prepare("UPDATE users SET status = 'SUSPENDED', updated_at = datetime('now') WHERE id = ?").bind(targetId),
-    c.env.DB.prepare("UPDATE auth_sessions SET revoked_at = datetime('now'), revoke_reason = 'USER_SUSPENDED' WHERE user_id = ?").bind(targetId)
-  ]);
+  if (!email || !fullName || !role || !securityTier) {
+    return c.json({ error: 'email, fullName, role, and securityTier are required', code: 'INVALID_REQUEST' }, 400);
+  }
 
-  return c.json({ success: true, message: `User ${targetId} suspended and active sessions revoked.` });
+  const authService = new AuthService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await authService.createUser(actor, {
+    email,
+    fullName,
+    department,
+    role,
+    securityTier,
+    scopes,
+    password,
+    mustChangePassword: !!mustChangePassword
+  });
+
+  if (!result.success) {
+    return c.json({ error: result.error, code: result.code }, result.status as any);
+  }
+  return c.json(result.data, 201);
 });
 
-app.post('/api/admin/users/:id/reactivate', requireTier('TIER_0'), requireReauth(10), async (c) => {
+// PATCH /api/admin/users/:id: Modify user role, tier, department, scopes
+app.patch('/api/admin/users/:id', requireTier('TIER_1'), async (c) => {
+  const actor = c.get('actor');
   const targetId = c.req.param('id');
-  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 503);
+  const body = await c.req.json().catch(() => ({}));
 
-  await c.env.DB.prepare("UPDATE users SET status = 'ACTIVE', failed_login_count = 0, locked_until = NULL, updated_at = datetime('now') WHERE id = ?").bind(targetId).run();
-  return c.json({ success: true, message: `User ${targetId} reactivated.` });
+  const authService = new AuthService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await authService.updateUser(actor, targetId, {
+    fullName: body.fullName,
+    department: body.department,
+    role: body.role,
+    securityTier: body.securityTier,
+    scopes: body.scopes
+  });
+
+  if (!result.success) {
+    return c.json({ error: result.error, code: result.code }, result.status as any);
+  }
+  return c.json(result.data, 200);
+});
+
+// POST /api/admin/users/:id/reset-password: Force set password for target user
+app.post('/api/admin/users/:id/reset-password', requireTier('TIER_1'), async (c) => {
+  const actor = c.get('actor');
+  const targetId = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+  const newPassword = body.newPassword || body.tempPassword;
+
+  if (!newPassword) {
+    return c.json({ error: 'newPassword or tempPassword is required', code: 'INVALID_REQUEST' }, 400);
+  }
+
+  const authService = new AuthService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await authService.adminResetPassword(actor, targetId, newPassword);
+
+  if (!result.success) {
+    return c.json({ error: result.error, code: result.code }, result.status as any);
+  }
+  return c.json(result.data, 200);
+});
+
+// POST /api/admin/users/:id/status: Freeze, Reactivate, Unlock Lockout, Deactivate
+app.post('/api/admin/users/:id/status', requireTier('TIER_1'), async (c) => {
+  const actor = c.get('actor');
+  const targetId = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+  let action = body.action;
+  if (!action && body.status) {
+    if (body.status === 'SUSPENDED') action = 'SUSPEND';
+    else if (body.status === 'ACTIVE') action = 'ACTIVATE';
+    else if (body.status === 'DEACTIVATED') action = 'DEACTIVATE';
+  }
+  const reason = body.reason;
+
+  if (!action || !['SUSPEND', 'ACTIVATE', 'UNLOCK', 'DEACTIVATE'].includes(action)) {
+    return c.json({ error: 'Valid action (SUSPEND, ACTIVATE, UNLOCK, DEACTIVATE) or status is required', code: 'INVALID_ACTION' }, 400);
+  }
+
+  const authService = new AuthService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await authService.setUserStatus(actor, targetId, action, reason);
+
+  if (!result.success) {
+    return c.json({ error: result.error, code: result.code }, result.status as any);
+  }
+  return c.json(result.data, 200);
+});
+
+// Backward-compatible endpoints for suspend and reactivate
+app.post('/api/admin/users/:id/suspend', requireTier('TIER_1'), async (c) => {
+  const targetId = c.req.param('id');
+  const actor = c.get('actor');
+  const authService = new AuthService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await authService.setUserStatus(actor, targetId, 'SUSPEND', 'Administrative suspension');
+  if (!result.success) {
+    return c.json({ error: result.error, code: result.code }, result.status as any);
+  }
+  return c.json(result.data, 200);
+});
+
+app.post('/api/admin/users/:id/reactivate', requireTier('TIER_1'), async (c) => {
+  const targetId = c.req.param('id');
+  const actor = c.get('actor');
+  const authService = new AuthService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await authService.setUserStatus(actor, targetId, 'ACTIVATE');
+  if (!result.success) {
+    return c.json({ error: result.error, code: result.code }, result.status as any);
+  }
+  return c.json(result.data, 200);
+});
+
+// POST /api/admin/users/:id/revoke-sessions: Force logout target user
+app.post('/api/admin/users/:id/revoke-sessions', requireTier('TIER_1'), async (c) => {
+  const targetId = c.req.param('id');
+  const actor = c.get('actor');
+  const authService = new AuthService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await authService.revokeUserSessions(actor, targetId);
+  if (!result.success) {
+    return c.json({ error: result.error, code: result.code }, result.status as any);
+  }
+  return c.json(result.data, 200);
+});
+
+// GET /api/admin/audit-logs: Comprehensive security audit stream
+app.get('/api/admin/audit-logs', requireTier('TIER_1'), async (c) => {
+  const actor = c.get('actor');
+  const authService = new AuthService(c.env?.DB, c.env, 'PIPELINE');
+  const userId = c.req.query('userId');
+  const eventType = c.req.query('eventType');
+  const outcome = c.req.query('outcome');
+  const limit = c.req.query('limit') ? Number(c.req.query('limit')) : 50;
+
+  const result = await authService.getAuditLogs(actor.workspace_id, { userId, eventType, outcome, limit });
+  return c.json(result.data, 200);
 });
 
 // ============================================================================
@@ -796,6 +963,85 @@ app.post('/api/v1/leads/export', requireRole(['PLATFORM_OWNER', 'OPERATIONS_ADMI
   c.header('X-Export-Rows', String(rows.length));
 
   return c.text(csvContent);
+});
+
+// ============================================================================
+// INTERNAL COMMAND & OPERATIONAL MESSAGING CONTROL PLANE
+// ============================================================================
+
+// GET /api/v1/messages/recipients: List eligible messaging targets
+app.get('/api/v1/messages/recipients', async (c) => {
+  const actor = c.get('actor');
+  const msgService = new MessagingService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await msgService.getRecipients(actor);
+  return c.json(result.data, 200);
+});
+
+// GET /api/v1/messages/unread-summary: Fast badge counter
+app.get('/api/v1/messages/unread-summary', async (c) => {
+  const actor = c.get('actor');
+  const msgService = new MessagingService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await msgService.getUnreadSummary(actor);
+  return c.json(result.data, 200);
+});
+
+// GET /api/v1/messages/threads: List user threads
+app.get('/api/v1/messages/threads', async (c) => {
+  const actor = c.get('actor');
+  const channel = c.req.query('channel');
+  const msgService = new MessagingService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await msgService.listThreads(actor, channel);
+  return c.json(result.data, 200);
+});
+
+// POST /api/v1/messages/threads: Create new thread
+app.post('/api/v1/messages/threads', async (c) => {
+  const actor = c.get('actor');
+  const body = await c.req.json().catch(() => ({}));
+  const msgService = new MessagingService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await msgService.createThread(actor, body);
+  if (!result.success) {
+    return c.json({ error: result.error, code: result.code }, result.status as any);
+  }
+  return c.json(result.data, 201);
+});
+
+// GET /api/v1/messages/threads/:id: Get thread and mark read
+app.get('/api/v1/messages/threads/:id', async (c) => {
+  const actor = c.get('actor');
+  const threadId = c.req.param('id');
+  const msgService = new MessagingService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await msgService.getThread(actor, threadId);
+  if (!result.success) {
+    return c.json({ error: result.error, code: result.code }, result.status as any);
+  }
+  return c.json(result.data, 200);
+});
+
+// POST /api/v1/messages/threads/:id/messages: Send reply
+app.post('/api/v1/messages/threads/:id/messages', async (c) => {
+  const actor = c.get('actor');
+  const threadId = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+  const msgService = new MessagingService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await msgService.sendMessage(actor, threadId, body);
+  if (!result.success) {
+    return c.json({ error: result.error, code: result.code }, result.status as any);
+  }
+  return c.json(result.data, 201);
+});
+
+// POST /api/v1/messages/threads/:id/acknowledge: Acknowledge directive
+app.post('/api/v1/messages/threads/:id/acknowledge', async (c) => {
+  const actor = c.get('actor');
+  const threadId = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+  const msgService = new MessagingService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await msgService.acknowledgeDirective(actor, threadId, body.messageId);
+  if (!result.success) {
+    return c.json({ error: result.error, code: result.code }, result.status as any);
+  }
+  return c.json(result.data, 200);
 });
 
 // 12. Static Assets fallback for SPA

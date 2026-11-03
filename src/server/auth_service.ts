@@ -10,7 +10,7 @@ import {
   constantTimeCompare
 } from './crypto.js';
 import { checkRateLimit } from './rate_limiter.js';
-import { normalizeStoredRole, toStoredRole, parseSqlUtc, type AuthenticatedUser, type SecurityTier, type UserRole, type UserStatus } from './auth.js';
+import { normalizeStoredRole, toStoredRole, parseSqlUtc, canManageTarget, type AuthenticatedUser, type SecurityTier, type UserRole, type UserStatus } from './auth.js';
 
 export interface LoginParams {
   email: string;
@@ -807,5 +807,588 @@ export class AuthService {
         securityTier: 'TIER_0'
       }
     };
+  }
+
+  /**
+   * List All Users in Workspace with Scopes, Active Sessions & Lockout State
+   */
+  async listUsers(actor: AuthenticatedUser): Promise<AuthServiceResponse> {
+    if (!this.db) return { success: false, status: 503, error: 'Database service unavailable' };
+
+    const usersResult = await this.db.prepare(`
+      SELECT
+        u.id, u.workspace_id, u.email, u.full_name, u.department,
+        u.role, u.security_tier, u.status, u.failed_login_count,
+        u.locked_until, u.last_login_at, u.must_change_password,
+        u.suspended_reason, u.suspended_by, u.created_at, u.updated_at,
+        (SELECT COUNT(*) FROM auth_sessions s WHERE s.user_id = u.id AND s.revoked_at IS NULL AND s.expires_at > datetime('now')) as active_sessions_count,
+        (SELECT COUNT(*) FROM mfa_factors m WHERE m.user_id = u.id AND m.enabled_at IS NOT NULL) as mfa_enabled
+      FROM users u
+      WHERE u.workspace_id = ?
+      ORDER BY
+        CASE u.security_tier
+          WHEN 'TIER_0' THEN 0
+          WHEN 'TIER_1' THEN 1
+          WHEN 'TIER_2' THEN 2
+          WHEN 'TIER_3' THEN 3
+          ELSE 4
+        END,
+        u.created_at ASC
+    `).bind(actor.workspace_id).all();
+
+    const users = usersResult.results || [];
+
+    // Attach scopes
+    const scopesResult = await this.db.prepare(`
+      SELECT user_id, permission FROM user_app_scopes WHERE app_key = ?
+    `).bind(this.appKey).all();
+
+    const scopesMap: Record<string, string[]> = {};
+    for (const sc of (scopesResult.results || [])) {
+      if (!scopesMap[sc.user_id]) scopesMap[sc.user_id] = [];
+      scopesMap[sc.user_id].push(sc.permission);
+    }
+
+    const enrichedUsers = users.map((u: any) => ({
+      ...u,
+      role: normalizeStoredRole(u.role),
+      scopes: scopesMap[u.id] || [],
+      can_manage: canManageTarget(actor, { id: u.id, security_tier: u.security_tier, role: normalizeStoredRole(u.role) }).allowed
+    }));
+
+    return { success: true, status: 200, data: { users: enrichedUsers } };
+  }
+
+  /**
+   * Direct User Creation by Platform Owner / Operations Admin
+   */
+  async createUser(
+    actor: AuthenticatedUser,
+    data: {
+      email: string;
+      fullName: string;
+      department?: string;
+      role: UserRole;
+      securityTier: SecurityTier;
+      scopes?: string[];
+      password?: string;
+      mustChangePassword?: boolean;
+    }
+  ): Promise<AuthServiceResponse> {
+    if (!this.db) return { success: false, status: 503, error: 'Database service unavailable' };
+
+    const check = canManageTarget(actor, { id: 'new', security_tier: data.securityTier, role: data.role }, data.securityTier);
+    if (!check.allowed) {
+      return { success: false, status: 403, error: check.reason || 'Insufficient tier authority to provision this user', code: 'INSUFFICIENT_TIER_AUTHORITY' };
+    }
+
+    const normalizedEmail = data.email.trim().toLowerCase();
+    const existing = await this.db.prepare('SELECT id, status FROM users WHERE normalized_email = ?').bind(normalizedEmail).first();
+    if (existing && existing.status !== 'DEACTIVATED') {
+      return { success: false, status: 409, error: 'User with this email already exists', code: 'USER_EXISTS' };
+    }
+
+    const userId = `usr_${generateRandomToken(8)}`;
+    const initialPassword = data.password || 'BiaiWelcome2026!';
+    if (initialPassword.length < 10) {
+      return { success: false, status: 400, error: 'Initial password must be at least 10 characters long', code: 'INVALID_PASSWORD' };
+    }
+    const passHash = await hashPassword(initialPassword);
+
+    await this.db.prepare(`
+      INSERT INTO users (
+        id, workspace_id, email, normalized_email, full_name, department,
+        password_hash, role, security_tier, status, must_change_password, mfa_required, created_at, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, 'ACTIVE', ?, 0, datetime('now'), datetime('now')
+      )
+    `).bind(
+      userId,
+      actor.workspace_id,
+      data.email.trim(),
+      normalizedEmail,
+      data.fullName.trim(),
+      data.department || 'Operations',
+      passHash,
+      toStoredRole(data.role),
+      data.securityTier,
+      data.mustChangePassword ? 1 : 0
+    ).run();
+
+    const scopesToGrant = data.scopes && data.scopes.length > 0
+      ? data.scopes
+      : (this.appKey === 'CRM' ? ['CRM_READ', 'CRM_TRIAGE'] : ['PIPELINE_READ', 'PIPELINE_REMEDIATE']);
+
+    for (const perm of scopesToGrant) {
+      await this.db.prepare(`
+        INSERT OR IGNORE INTO user_app_scopes (user_id, app_key, permission, granted_by, created_at)
+        VALUES (?, ?, ?, ?, datetime('now'))
+      `).bind(userId, this.appKey, perm, actor.id).run();
+    }
+
+    await logAuthEvent(this.db, {
+      workspaceId: actor.workspace_id,
+      actorUserId: actor.id,
+      subjectUserId: userId,
+      eventType: 'USER_CREATED',
+      outcome: 'SUCCESS',
+      metadata: { role: data.role, securityTier: data.securityTier, email: normalizedEmail }
+    });
+
+    const userObj = {
+      id: userId,
+      workspace_id: actor.workspace_id,
+      email: data.email.trim(),
+      full_name: data.fullName.trim(),
+      department: data.department || 'Operations',
+      role: data.role,
+      security_tier: data.securityTier,
+      status: 'ACTIVE',
+      must_change_password: data.mustChangePassword ? 1 : 0
+    };
+
+    return {
+      success: true,
+      status: 201,
+      data: {
+        user: userObj,
+        userId,
+        email: data.email,
+        fullName: data.fullName,
+        role: data.role,
+        securityTier: data.securityTier,
+        status: 'ACTIVE',
+        initialPassword
+      }
+    };
+  }
+
+  /**
+   * Administrative User Update: Role, Tier, Department, Scopes
+   */
+  async updateUser(
+    actor: AuthenticatedUser,
+    targetUserId: string,
+    data: {
+      fullName?: string;
+      department?: string;
+      role?: UserRole;
+      securityTier?: SecurityTier;
+      scopes?: string[];
+    }
+  ): Promise<AuthServiceResponse> {
+    if (!this.db) return { success: false, status: 503, error: 'Database service unavailable' };
+
+    const target = await this.db.prepare('SELECT * FROM users WHERE id = ?').bind(targetUserId).first();
+    if (!target) return { success: false, status: 404, error: 'User not found', code: 'USER_NOT_FOUND' };
+
+    const check = canManageTarget(actor, { id: target.id, security_tier: target.security_tier, role: normalizeStoredRole(target.role) }, data.securityTier);
+    if (!check.allowed) {
+      return { success: false, status: 403, error: check.reason || 'Insufficient tier authority to modify target user', code: 'INSUFFICIENT_TIER_AUTHORITY' };
+    }
+
+    const newRole = data.role ? toStoredRole(data.role) : target.role;
+    const newTier = data.securityTier || target.security_tier;
+    const newName = data.fullName ? data.fullName.trim() : target.full_name;
+    const newDept = data.department !== undefined ? data.department : target.department;
+
+    await this.db.prepare(`
+      UPDATE users SET
+        full_name = ?,
+        department = ?,
+        role = ?,
+        security_tier = ?,
+        updated_at = datetime('now')
+      WHERE id = ?
+    `).bind(newName, newDept, newRole, newTier, targetUserId).run();
+
+    if (data.scopes && Array.isArray(data.scopes)) {
+      await this.db.prepare('DELETE FROM user_app_scopes WHERE user_id = ? AND app_key = ?').bind(targetUserId, this.appKey).run();
+      for (const perm of data.scopes) {
+        await this.db.prepare(`
+          INSERT INTO user_app_scopes (user_id, app_key, permission, granted_by, created_at)
+          VALUES (?, ?, ?, ?, datetime('now'))
+        `).bind(targetUserId, this.appKey, perm, actor.id).run();
+      }
+    }
+
+    if (data.securityTier || data.role) {
+      await this.db.prepare(`
+        UPDATE auth_sessions
+        SET revoked_at = datetime('now'), revoke_reason = 'PRIVILEGE_CHANGED'
+        WHERE user_id = ? AND revoked_at IS NULL
+      `).bind(targetUserId).run();
+    }
+
+    await logAuthEvent(this.db, {
+      workspaceId: actor.workspace_id,
+      actorUserId: actor.id,
+      subjectUserId: targetUserId,
+      eventType: 'USER_UPDATED',
+      outcome: 'SUCCESS',
+      metadata: { newRole, newTier, updatedFields: Object.keys(data) }
+    });
+
+    return {
+      success: true,
+      status: 200,
+      data: { message: 'User updated successfully', userId: targetUserId }
+    };
+  }
+
+  /**
+   * Admin Password Reset: Force set temporary password for lower-tier user
+   */
+  async adminResetPassword(
+    actor: AuthenticatedUser,
+    targetUserId: string,
+    newPassword: string
+  ): Promise<AuthServiceResponse> {
+    if (!this.db) return { success: false, status: 503, error: 'Database service unavailable' };
+
+    const target = await this.db.prepare('SELECT * FROM users WHERE id = ?').bind(targetUserId).first();
+    if (!target) return { success: false, status: 404, error: 'User not found', code: 'USER_NOT_FOUND' };
+
+    const check = canManageTarget(actor, { id: target.id, security_tier: target.security_tier, role: normalizeStoredRole(target.role) });
+    if (!check.allowed) {
+      return { success: false, status: 403, error: check.reason || 'Insufficient tier authority to reset this user password', code: 'INSUFFICIENT_TIER_AUTHORITY' };
+    }
+
+    if (newPassword.length < 10) {
+      return { success: false, status: 400, error: 'Password must be at least 10 characters long', code: 'INVALID_PASSWORD' };
+    }
+
+    const passHash = await hashPassword(newPassword);
+
+    await this.db.batch([
+      this.db.prepare(`
+        UPDATE users SET
+          password_hash = ?,
+          failed_login_count = 0,
+          locked_until = NULL,
+          must_change_password = 1,
+          password_changed_at = datetime('now'),
+          updated_at = datetime('now')
+        WHERE id = ?
+      `).bind(passHash, targetUserId),
+      this.db.prepare(`
+        UPDATE auth_sessions
+        SET revoked_at = datetime('now'), revoke_reason = 'ADMIN_PASSWORD_RESET'
+        WHERE user_id = ? AND revoked_at IS NULL
+      `).bind(targetUserId)
+    ]);
+
+    await logAuthEvent(this.db, {
+      workspaceId: actor.workspace_id,
+      actorUserId: actor.id,
+      subjectUserId: targetUserId,
+      eventType: 'ADMIN_PASSWORD_RESET',
+      outcome: 'SUCCESS'
+    });
+
+    return {
+      success: true,
+      status: 200,
+      data: { message: 'Password successfully reset and sessions revoked.', userId: targetUserId }
+    };
+  }
+
+  /**
+   * Set User Status: Suspend/Freeze, Reactivate, Unlock Lockout, Deactivate
+   */
+  async setUserStatus(
+    actor: AuthenticatedUser,
+    targetUserId: string,
+    action: 'SUSPEND' | 'ACTIVATE' | 'UNLOCK' | 'DEACTIVATE',
+    reason?: string
+  ): Promise<AuthServiceResponse> {
+    if (!this.db) return { success: false, status: 503, error: 'Database service unavailable' };
+
+    const target = await this.db.prepare('SELECT * FROM users WHERE id = ?').bind(targetUserId).first();
+    if (!target) return { success: false, status: 404, error: 'User not found', code: 'USER_NOT_FOUND' };
+
+    const check = canManageTarget(actor, { id: target.id, security_tier: target.security_tier, role: normalizeStoredRole(target.role) });
+    if (!check.allowed) {
+      return { success: false, status: 403, error: check.reason || 'Insufficient tier authority for user action', code: 'INSUFFICIENT_TIER_AUTHORITY' };
+    }
+
+    if (action === 'SUSPEND') {
+      await this.db.batch([
+        this.db.prepare(`
+          UPDATE users SET
+            status = 'SUSPENDED',
+            suspended_reason = ?,
+            suspended_by = ?,
+            updated_at = datetime('now')
+          WHERE id = ?
+        `).bind(reason || 'Administrative freeze', actor.id, targetUserId),
+        this.db.prepare(`
+          UPDATE auth_sessions
+          SET revoked_at = datetime('now'), revoke_reason = 'USER_SUSPENDED'
+          WHERE user_id = ? AND revoked_at IS NULL
+        `).bind(targetUserId)
+      ]);
+
+      await logAuthEvent(this.db, {
+        workspaceId: actor.workspace_id,
+        actorUserId: actor.id,
+        subjectUserId: targetUserId,
+        eventType: 'USER_SUSPENDED',
+        outcome: 'SUCCESS',
+        reasonCode: reason || 'ADMIN_FREEZE'
+      });
+    } else if (action === 'ACTIVATE') {
+      await this.db.prepare(`
+        UPDATE users SET
+          status = 'ACTIVE',
+          failed_login_count = 0,
+          locked_until = NULL,
+          suspended_reason = NULL,
+          suspended_by = NULL,
+          updated_at = datetime('now')
+        WHERE id = ?
+      `).bind(targetUserId).run();
+
+      await logAuthEvent(this.db, {
+        workspaceId: actor.workspace_id,
+        actorUserId: actor.id,
+        subjectUserId: targetUserId,
+        eventType: 'USER_REACTIVATED',
+        outcome: 'SUCCESS'
+      });
+    } else if (action === 'UNLOCK') {
+      await this.db.prepare(`
+        UPDATE users SET
+          failed_login_count = 0,
+          locked_until = NULL,
+          updated_at = datetime('now')
+        WHERE id = ?
+      `).bind(targetUserId).run();
+
+      await logAuthEvent(this.db, {
+        workspaceId: actor.workspace_id,
+        actorUserId: actor.id,
+        subjectUserId: targetUserId,
+        eventType: 'USER_UNLOCKED',
+        outcome: 'SUCCESS'
+      });
+    } else if (action === 'DEACTIVATE') {
+      await this.db.batch([
+        this.db.prepare(`
+          UPDATE users SET status = 'DEACTIVATED', updated_at = datetime('now') WHERE id = ?
+        `).bind(targetUserId),
+        this.db.prepare(`
+          UPDATE auth_sessions
+          SET revoked_at = datetime('now'), revoke_reason = 'USER_DEACTIVATED'
+          WHERE user_id = ? AND revoked_at IS NULL
+        `).bind(targetUserId)
+      ]);
+
+      await logAuthEvent(this.db, {
+        workspaceId: actor.workspace_id,
+        actorUserId: actor.id,
+        subjectUserId: targetUserId,
+        eventType: 'USER_DEACTIVATED',
+        outcome: 'SUCCESS'
+      });
+    } else {
+      return { success: false, status: 400, error: 'Invalid action', code: 'INVALID_ACTION' };
+    }
+
+    const updatedUser = await this.db.prepare(`
+      SELECT id, workspace_id, email, full_name, department, role, security_tier, status, suspended_reason
+      FROM users WHERE id = ?
+    `).bind(targetUserId).first();
+
+    return {
+      success: true,
+      status: 200,
+      data: {
+        message: `User status successfully updated to ${action}`,
+        user: updatedUser
+      }
+    };
+  }
+
+  /**
+   * Revoke Target User Sessions
+   */
+  async revokeUserSessions(actor: AuthenticatedUser, targetUserId: string): Promise<AuthServiceResponse> {
+    if (!this.db) return { success: false, status: 503, error: 'Database service unavailable' };
+
+    const target = await this.db.prepare('SELECT * FROM users WHERE id = ?').bind(targetUserId).first();
+    if (!target) return { success: false, status: 404, error: 'User not found', code: 'USER_NOT_FOUND' };
+
+    const check = canManageTarget(actor, { id: target.id, security_tier: target.security_tier, role: normalizeStoredRole(target.role) });
+    if (!check.allowed) {
+      return { success: false, status: 403, error: check.reason || 'Insufficient tier authority', code: 'INSUFFICIENT_TIER_AUTHORITY' };
+    }
+
+    await this.db.prepare(`
+      UPDATE auth_sessions
+      SET revoked_at = datetime('now'), revoke_reason = 'ADMIN_FORCE_LOGOUT'
+      WHERE user_id = ? AND revoked_at IS NULL
+    `).bind(targetUserId).run();
+
+    await logAuthEvent(this.db, {
+      workspaceId: actor.workspace_id,
+      actorUserId: actor.id,
+      subjectUserId: targetUserId,
+      eventType: 'SESSIONS_REVOKED',
+      outcome: 'SUCCESS'
+    });
+
+    return { success: true, status: 200, data: { message: 'All active sessions revoked for user.' } };
+  }
+
+  /**
+   * Workspace Security Audit Trail
+   */
+  async getAuditLogs(
+    workspaceId: string,
+    filter?: { userId?: string; eventType?: string; outcome?: string; limit?: number }
+  ): Promise<AuthServiceResponse> {
+    if (!this.db) return { success: false, status: 503, error: 'Database service unavailable' };
+
+    let sql = `
+      SELECT
+        e.id, e.workspace_id, e.event_type, e.outcome, e.reason_code,
+        e.ip_hash, e.metadata_json, e.created_at,
+        u_act.full_name as actor_name, u_act.email as actor_email, u_act.role as actor_role,
+        u_sub.full_name as subject_name, u_sub.email as subject_email, u_sub.role as subject_role
+      FROM auth_events e
+      LEFT JOIN users u_act ON e.actor_user_id = u_act.id
+      LEFT JOIN users u_sub ON e.subject_user_id = u_sub.id
+      WHERE (e.workspace_id = ? OR e.workspace_id IS NULL)
+    `;
+    const params: any[] = [workspaceId];
+
+    if (filter?.userId) {
+      sql += ' AND (e.actor_user_id = ? OR e.subject_user_id = ?)';
+      params.push(filter.userId, filter.userId);
+    }
+    if (filter?.eventType) {
+      sql += ' AND e.event_type = ?';
+      params.push(filter.eventType);
+    }
+    if (filter?.outcome) {
+      sql += ' AND e.outcome = ?';
+      params.push(filter.outcome);
+    }
+
+    sql += ' ORDER BY e.created_at DESC LIMIT ?';
+    params.push(filter?.limit || 50);
+
+    const rows = await this.db.prepare(sql).bind(...params).all();
+    return { success: true, status: 200, data: { logs: rows.results || [], auditLogs: rows.results || [] } };
+  }
+
+  /**
+   * Self-Service: Update Profile
+   */
+  async updateProfile(userId: string, data: { fullName?: string; department?: string }): Promise<AuthServiceResponse> {
+    if (!this.db) return { success: false, status: 503, error: 'Database service unavailable' };
+
+    const updates: string[] = [];
+    const params: any[] = [];
+
+    if (data.fullName && data.fullName.trim()) {
+      updates.push('full_name = ?');
+      params.push(data.fullName.trim());
+    }
+    if (data.department !== undefined) {
+      updates.push('department = ?');
+      params.push(data.department.trim());
+    }
+
+    if (updates.length === 0) {
+      return { success: true, status: 200, data: { message: 'No changes provided' } };
+    }
+
+    updates.push("updated_at = datetime('now')");
+    params.push(userId);
+
+    await this.db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).bind(...params).run();
+
+    await logAuthEvent(this.db, {
+      actorUserId: userId,
+      subjectUserId: userId,
+      eventType: 'PROFILE_UPDATED',
+      outcome: 'SUCCESS',
+      metadata: data
+    });
+
+    const user = await this.db.prepare(`
+      SELECT id, workspace_id, email, full_name, department, role, security_tier, status
+      FROM users WHERE id = ?
+    `).bind(userId).first();
+
+    return { success: true, status: 200, data: { message: 'Profile updated successfully', user } };
+  }
+
+  /**
+   * Self-Service: List User Active Sessions
+   */
+  async listSessions(userId: string, currentSessionHash?: string): Promise<AuthServiceResponse> {
+    if (!this.db) return { success: false, status: 503, error: 'Database service unavailable' };
+
+    const rows = await this.db.prepare(`
+      SELECT
+        id_hash, created_at, last_seen_at, expires_at, idle_expires_at,
+        ip_hash, user_agent_hash
+      FROM auth_sessions
+      WHERE user_id = ? AND revoked_at IS NULL AND expires_at > datetime('now')
+      ORDER BY last_seen_at DESC
+    `).bind(userId).all();
+
+    const sessions = (rows.results || []).map((s: any) => ({
+      id_hash: s.id_hash.slice(0, 12) + '...',
+      created_at: s.created_at,
+      last_seen_at: s.last_seen_at,
+      expires_at: s.expires_at,
+      is_current: currentSessionHash ? s.id_hash === currentSessionHash : false
+    }));
+
+    return { success: true, status: 200, data: { sessions } };
+  }
+
+  /**
+   * Self-Service: Revoke Other Sessions
+   */
+  async revokeOtherSessions(userId: string, currentSessionHash: string): Promise<AuthServiceResponse> {
+    if (!this.db) return { success: false, status: 503, error: 'Database service unavailable' };
+
+    await this.db.prepare(`
+      UPDATE auth_sessions
+      SET revoked_at = datetime('now'), revoke_reason = 'USER_REVOKED_OTHERS'
+      WHERE user_id = ? AND id_hash != ? AND revoked_at IS NULL
+    `).bind(userId, currentSessionHash).run();
+
+    await logAuthEvent(this.db, {
+      actorUserId: userId,
+      subjectUserId: userId,
+      eventType: 'SESSIONS_REVOKED_OTHERS',
+      outcome: 'SUCCESS'
+    });
+
+    return { success: true, status: 200, data: { message: 'All other active sessions revoked.' } };
+  }
+
+  /**
+   * Self-Service: User Activity Timeline
+   */
+  async getUserActivity(userId: string, limit = 20): Promise<AuthServiceResponse> {
+    if (!this.db) return { success: false, status: 503, error: 'Database service unavailable' };
+
+    const rows = await this.db.prepare(`
+      SELECT event_type, outcome, reason_code, created_at, metadata_json
+      FROM auth_events
+      WHERE actor_user_id = ? OR subject_user_id = ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    `).bind(userId, userId, limit).all();
+
+    return { success: true, status: 200, data: { activity: rows.results || [] } };
   }
 }

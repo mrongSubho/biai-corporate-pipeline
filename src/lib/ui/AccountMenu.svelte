@@ -15,9 +15,12 @@
     collapsed?: boolean;
     theme: 'light' | 'dark';
     audioEnabled: boolean;
+    unreadCount?: number;
     onToggleTheme: () => void;
     onToggleAudio: () => void;
     onLogout: () => void;
+    onOpenAccountControl?: () => void;
+    onOpenMessaging?: () => void;
   }
 
   let {
@@ -25,9 +28,12 @@
     collapsed = false,
     theme,
     audioEnabled,
+    unreadCount = 0,
     onToggleTheme,
     onToggleAudio,
-    onLogout
+    onLogout,
+    onOpenAccountControl,
+    onOpenMessaging
   }: Props = $props();
 
   let menuOpen = $state(false);
@@ -145,7 +151,32 @@
         </div>
 
         <div class="py-1">
-          <!-- 1. View Profile -->
+          <!-- 1. Account & Access Controls -->
+          <button
+            type="button"
+            onclick={() => { closeMenu(); onOpenAccountControl?.(); }}
+            class="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800 flex items-center gap-2 transition font-medium">
+            <span class="text-orange-600 dark:text-orange-400">🛡️</span>
+            <span>Account & Access Controls</span>
+          </button>
+
+          <!-- 2. Command Messages -->
+          <button
+            type="button"
+            onclick={() => { closeMenu(); onOpenMessaging?.(); }}
+            class="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800 flex items-center justify-between transition">
+            <span class="flex items-center gap-2">
+              <span>💬</span>
+              <span>Command Messages</span>
+            </span>
+            {#if unreadCount > 0}
+              <span class="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-orange-600 text-white font-mono">
+                {unreadCount}
+              </span>
+            {/if}
+          </button>
+
+          <!-- 3. View Quick Profile -->
           <button
             type="button"
             onclick={() => { closeMenu(); showProfileModal = true; }}
@@ -153,7 +184,7 @@
             <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
             </svg>
-            <span>View Profile & Session</span>
+            <span>Session Identity Summary</span>
           </button>
 
           <!-- 2. Preferences (Theme & Audio) -->

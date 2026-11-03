@@ -337,4 +337,165 @@ describe('BIAI Task 2 Pipeline — API Security, Financial Trust & D1 Persistenc
     }, env);
     expect(meAfterLogout.status).toBe(401);
   });
+
+  it('Self-service profile update and session inspection', async () => {
+    // 1. Update profile
+    const updateRes = await app.request('/api/auth/profile', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer owner-token' },
+      body: JSON.stringify({ fullName: 'Shakib Rahman (Head of Partnerships)', department: 'Corporate Enterprise' })
+    }, env);
+    expect(updateRes.status).toBe(200);
+    const updateJson: any = await updateRes.json();
+    expect(updateJson.user.full_name).toBe('Shakib Rahman (Head of Partnerships)');
+
+    // 2. Inspect active sessions
+    const sessionsRes = await app.request('/api/auth/sessions', {
+      headers: { 'Authorization': 'Bearer owner-token' }
+    }, env);
+    expect(sessionsRes.status).toBe(200);
+    const sessionsJson: any = await sessionsRes.json();
+    expect(sessionsJson.sessions).toBeDefined();
+
+    // 3. Inspect personal security activity
+    const actRes = await app.request('/api/auth/activity', {
+      headers: { 'Authorization': 'Bearer owner-token' }
+    }, env);
+    expect(actRes.status).toBe(200);
+    const actJson: any = await actRes.json();
+    expect(actJson.activity).toBeDefined();
+  });
+
+  it('Admin user management, privilege delegation & anti-escalation enforcement', async () => {
+    // 1. Platform Owner lists all users
+    const listRes = await app.request('/api/admin/users', {
+      headers: { 'Authorization': 'Bearer owner-token' }
+    }, env);
+    expect(listRes.status).toBe(200);
+    const listJson: any = await listRes.json();
+    expect(listJson.users.length).toBeGreaterThanOrEqual(4);
+
+    // 2. Platform Owner provisions new operator
+    const createRes = await app.request('/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer owner-token' },
+      body: JSON.stringify({
+        fullName: 'Pipeline Specialist',
+        email: 'pipeline.spec@biai.com.bd',
+        role: 'ACCOUNT_EXECUTIVE',
+        securityTier: 'TIER_3',
+        department: 'Corporate Sales',
+        tempPassword: 'InitialSecretPassword123!'
+      })
+    }, env);
+    expect(createRes.status).toBe(201);
+    const createJson: any = await createRes.json();
+    const newUserId = createJson.user.id;
+    expect(createJson.user.must_change_password).toBe(1);
+
+    // 3. STRICT ANTI-ESCALATION: Operations Admin (TIER_1) CANNOT modify Platform Owner (TIER_0)
+    const illegalSuspendRes = await app.request('/api/admin/users/usr_b2b_admin/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ops-token' },
+      body: JSON.stringify({ status: 'SUSPENDED', reason: 'Unauthorized freeze attempt' })
+    }, env);
+    expect(illegalSuspendRes.status).toBe(403);
+    const illegalJson: any = await illegalSuspendRes.json();
+    expect(illegalJson.code).toBe('INSUFFICIENT_TIER_AUTHORITY');
+
+    // 4. Platform Owner resets new operator password
+    const resetRes = await app.request(`/api/admin/users/${newUserId}/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer owner-token' },
+      body: JSON.stringify({ tempPassword: 'ResetSecretPassword123!' })
+    }, env);
+    expect(resetRes.status).toBe(200);
+
+    // 5. Platform Owner suspends new operator
+    const suspendRes = await app.request(`/api/admin/users/${newUserId}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer owner-token' },
+      body: JSON.stringify({ status: 'SUSPENDED', reason: 'Routine audit freeze' })
+    }, env);
+    expect(suspendRes.status).toBe(200);
+    const suspendJson: any = await suspendRes.json();
+    expect(suspendJson.user.status).toBe('SUSPENDED');
+
+    // 6. Admin audit logs recorded
+    const auditRes = await app.request('/api/admin/audit-logs', {
+      headers: { 'Authorization': 'Bearer owner-token' }
+    }, env);
+    expect(auditRes.status).toBe(200);
+    const auditJson: any = await auditRes.json();
+    expect(auditJson.auditLogs.some((l: any) => l.event_type === 'USER_CREATED')).toBe(true);
+  });
+
+  it('Internal Command Messaging: directives, acknowledgment & unread count', async () => {
+    // 1. Get eligible recipients
+    const recRes = await app.request('/api/v1/messages/recipients', {
+      headers: { 'Authorization': 'Bearer owner-token' }
+    }, env);
+    expect(recRes.status).toBe(200);
+    const recJson: any = await recRes.json();
+    expect(recJson.recipients.length).toBeGreaterThan(0);
+
+    // 2. Platform Owner dispatches an Urgent Operational Directive to Operations Admin
+    const threadRes = await app.request('/api/v1/messages/threads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer owner-token' },
+      body: JSON.stringify({
+        channelType: 'DIRECT',
+        recipientId: 'usr_b2b_ops',
+        subject: 'Urgent: Remediation approval needed for Lead #L11',
+        content: 'Please confirm contract value matches invoice before moving to Paid.',
+        priority: 'URGENT',
+        requiresAck: true,
+        contextType: 'LEAD',
+        contextId: 'L11'
+      })
+    }, env);
+    expect(threadRes.status).toBe(201);
+    const threadJson: any = await threadRes.json();
+    const threadId = threadJson.thread.id;
+    expect(threadJson.thread.requires_ack).toBe(1);
+
+    // 3. Operations Admin checks unread summary
+    const unreadRes = await app.request('/api/v1/messages/unread-summary', {
+      headers: { 'Authorization': 'Bearer ops-token' }
+    }, env);
+    expect(unreadRes.status).toBe(200);
+    const unreadJson: any = await unreadRes.json();
+    expect(unreadJson.unreadCount).toBeGreaterThanOrEqual(1);
+
+    // 4. Operations Admin reads the thread
+    const readRes = await app.request(`/api/v1/messages/threads/${threadId}`, {
+      headers: { 'Authorization': 'Bearer ops-token' }
+    }, env);
+    expect(readRes.status).toBe(200);
+
+    // 5. Operations Admin sends a reply
+    const replyRes = await app.request(`/api/v1/messages/threads/${threadId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ops-token' },
+      body: JSON.stringify({ content: 'Contract value verified against bank statement. Cleared.' })
+    }, env);
+    expect(replyRes.status).toBe(201);
+
+    // 6. Operations Admin acknowledges receipt of the directive
+    const ackRes = await app.request(`/api/v1/messages/threads/${threadId}/acknowledge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ops-token' },
+      body: JSON.stringify({})
+    }, env);
+    expect(ackRes.status).toBe(200);
+    const ackJson: any = await ackRes.json();
+    expect(ackJson.success).toBe(true);
+
+    // 7. Verify thread state has is_acknowledged = 1
+    const verifyRes = await app.request(`/api/v1/messages/threads/${threadId}`, {
+      headers: { 'Authorization': 'Bearer owner-token' }
+    }, env);
+    const verifyJson: any = await verifyRes.json();
+    expect(verifyJson.thread.is_acknowledged).toBe(1);
+  });
 });
