@@ -129,6 +129,8 @@
     <!-- Upward Popover Menu -->
     {#if menuOpen}
       <div
+        role="menu"
+        tabindex="-1"
         onkeydown={handleMenuKeydown}
         class="absolute bottom-full left-0 mb-2 w-64 bg-white dark:bg-slate-900 rounded-xl border border-warm-200 dark:border-slate-800 shadow-xl py-1.5 z-50 text-xs font-sans animate-in fade-in slide-in-from-bottom-2 duration-150">
         

@@ -4,6 +4,8 @@
   import { executeCopilotQuery } from '../lib/engine/copilot';
   import { generateCorporateFollowupEmail, type EmailDraftResult } from '../lib/engine/email_drafter';
   import { soundFx } from '../lib/audio/sound_fx.ts';
+  import { urgencyPresentation, type Urgency } from '../lib/ui/status';
+  import AccountMenu from '../lib/ui/AccountMenu.svelte';
   import type { CorporateLead, PipelineStage, AnomalyFinding } from '../lib/types/pipeline';
 
   // --- STATE WITH SVELTE 5 RUNES ---
@@ -14,6 +16,7 @@
   let selectedLeadId = $state<string>('L01');
   let theme = $state<'light' | 'dark'>('light');
   let searchQuery = $state('');
+  let mobileNavOpen = $state(false);
 
   // Benchmark Date: 1 Nov 2026 per brief
   const BENCHMARK_DATE = '2026-11-01';
@@ -45,8 +48,10 @@
   let emailTone = $state<'POLITE_CHECKIN' | 'PROPOSAL_FOLLOWUP' | 'INVOICE_REMINDER'>('POLITE_CHECKIN');
   let bankConfirmed = $state(false);
   let feedbackMessage = $state<string | null>(null);
+  let feedbackTimer: any = null;
   let maskPiiOnExport = $state(false);
   let audioEnabled = $state(soundFx.enabled);
+  let isSendingEmail = $state(false);
 
   async function checkAuth() {
     authChecking = true;
@@ -151,9 +156,10 @@
     const handleKeydown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
-        activeTab = 'copilot';
-        const copilotInput = document.getElementById('copilot-input');
-        if (copilotInput) copilotInput.focus();
+        const searchInput = document.getElementById('global-search') as HTMLInputElement;
+        if (searchInput) searchInput.focus();
+      } else if (e.key === 'Escape') {
+        if (mobileNavOpen) mobileNavOpen = false;
       }
     };
 
@@ -220,40 +226,30 @@
   );
 
   // --- RECONCILED FINANCIAL CALCULATIONS (100% AUDIT ACCURACY) ---
-  // 1. Contracted Pipeline Value (Excludes Lost)
-  // Cleaned = 3,170,000 BDT | Raw = 4,220,000 BDT
   let contractedPipelineValue = $derived(
     displayLeads.filter(l => l.stage !== 'Lost').reduce((s, l) => s + (l.deal_value_bdt || 0), 0)
   );
 
-  // 2. Cash Collected (Paid)
-  // L12 Tranche 1 = 150,000 BDT
   let cashCollected = $derived(
     displayLeads.reduce((s, l) => s + (l.amount_collected_bdt || 0), 0)
   );
 
-  // 3. Outstanding Receivables (Invoiced + Paid Due ONLY)
-  // L07 (250k) + L22 (150k) + L12 Tranche 2 (150k) = 550,000 BDT
   let outstandingReceivables = $derived(
     displayLeads
       .filter(l => l.stage === 'Invoice sent' || l.stage === 'Paid')
       .reduce((s, l) => s + (l.amount_due_bdt || 0), 0)
   );
 
-  // 4. Weighted Active Pipeline (New, Contacted, Meeting, Proposal)
-  // 3.17M - 400k (Invoiced) - 300k (Paid) = 2,470,000 BDT
   let activeWeightedPipeline = $derived(
     displayLeads
       .filter(l => ['New', 'Contacted', 'Meeting', 'Proposal'].includes(l.stage))
       .reduce((s, l) => s + (l.deal_value_bdt || 0), 0)
   );
 
-  // Overdue count strictly before benchmark date 2026-11-01
   let overdueLeads = $derived(
     displayLeads.filter(l => l.next_followup && l.next_followup < BENCHMARK_DATE && l.stage !== 'Lost' && l.stage !== 'Paid')
   );
 
-  // Active stages for desktop board (terminal stages collapsed)
   const activeStages: PipelineStage[] = ['New', 'Contacted', 'Meeting', 'Proposal', 'Invoice sent'];
   const terminalStages: PipelineStage[] = ['Paid', 'Lost'];
 
@@ -450,8 +446,9 @@
   }
 
   function showFeedback(msg: string) {
+    if (feedbackTimer) clearTimeout(feedbackTimer);
     feedbackMessage = msg;
-    setTimeout(() => { feedbackMessage = null; }, 2500);
+    feedbackTimer = setTimeout(() => { feedbackMessage = null; }, 3000);
   }
 
   async function exportCleanedCsv() {
@@ -497,6 +494,7 @@
       return;
     }
 
+    isSendingEmail = true;
     try {
       const res = await fetch('/api/v1/email/send', {
         method: 'POST',
@@ -525,27 +523,40 @@
     } catch (e) {
       soundFx.playWarningPing();
       showFeedback('Network error: Email dispatch failed');
+    } finally {
+      isSendingEmail = false;
     }
   }
 </script>
 
 <!-- APPLICATION CONTAINER -->
-<div class="h-screen w-screen flex flex-col overflow-hidden bg-warm-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 font-sans selection:bg-orange-600 selection:text-white">
+<div class="h-dvh w-screen flex flex-col overflow-hidden bg-warm-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 font-sans selection:bg-orange-600 selection:text-white">
 
   <!-- ======================================================== -->
   <!-- 1. TOP HEADER (AUTHENTIC BIAI ECOSYSTEM HEADER)          -->
   <!-- ======================================================== -->
-  <header class="h-14 border-b border-warm-200 dark:border-slate-800 bg-[#FAF9F6] dark:bg-[#080C14] px-4 flex items-center justify-between gap-4 shrink-0 z-30 transition-colors">
+  <header class="h-14 border-b border-warm-200 dark:border-slate-800 bg-[#FAF9F6] dark:bg-[#080C14] px-4 flex items-center justify-between gap-3 shrink-0 z-30 transition-colors">
 
     <!-- Left: Authentic BIAI Brand Identity & Ecosystem Navigation -->
-    <div class="flex items-center gap-5">
+    <div class="flex items-center gap-3 md:gap-5">
+      <!-- Mobile Drawer Toggle (< 1024px) -->
+      <button
+        type="button"
+        onclick={() => mobileNavOpen = !mobileNavOpen}
+        aria-label="Toggle navigation drawer"
+        class="lg:hidden p-1.5 rounded-lg border border-warm-200 dark:border-slate-800 text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white hover:bg-warm-100 dark:hover:bg-slate-800 transition">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+
       <!-- Official BIAI Circular Woven Emblem & Spaced Wordmark -->
       <a href="https://biai.com.bd" target="_blank" rel="noopener noreferrer" class="flex items-center gap-2.5 group">
         <img src="/biai-logo.png" alt="Bangladesh Institute of AI" class="w-8 h-8 rounded-full shrink-0 object-contain shadow-xs transition group-hover:scale-105" />
         <span class="font-bold tracking-[0.3em] text-slate-900 dark:text-white text-base">B I A I</span>
       </a>
 
-      <!-- Ecosystem Workspace Navigation Links (Styled to match biai.com.bd navbar) -->
+      <!-- Ecosystem Workspace Navigation Links -->
       <nav class="hidden md:flex items-center gap-1 text-xs font-medium">
         <!-- Switch to Task 1 CRM Triage -->
         <a
@@ -583,16 +594,17 @@
     </div>
 
     <!-- Center: Global Search (Cmd+K) -->
-    <div class="flex-1 max-w-md relative">
+    <div class="flex-1 max-w-md relative min-w-0">
       <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
         <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
         </svg>
       </div>
       <input
+        id="global-search"
         type="text"
         bind:value={searchQuery}
-        placeholder="Search company, contact, phone, lead ID...  ⌘K"
+        placeholder="Search company, contact, phone, ID... ⌘K"
         class="w-full text-xs pl-9 pr-14 py-1.5 rounded-lg border border-warm-200 dark:border-slate-800 bg-white/70 dark:bg-slate-950/70 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-orange-600 transition"
       />
       {#if searchQuery}
@@ -605,46 +617,33 @@
     </div>
 
     <!-- Right: Utility Controls & Primary Action -->
-    <div class="flex items-center gap-2">
-      <!-- Audio FX Toggle Button -->
-      <button
-        onclick={toggleAudio}
-        aria-label="Toggle audio effects"
-        title={audioEnabled ? 'Audio FX Enabled (Click to Mute)' : 'Audio FX Muted (Click to Unmute)'}
-        class="text-xs p-1.5 rounded flex items-center gap-1 text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white hover:bg-warm-100 dark:hover:bg-slate-800 transition">
-        {#if audioEnabled}
-          <span class="text-emerald-600 dark:text-emerald-400 font-mono text-sm" title="Audio On">🔊</span>
-        {:else}
-          <span class="text-slate-400 font-mono text-sm" title="Audio Muted">🔇</span>
-        {/if}
-      </button>
-
+    <div class="flex items-center gap-2 shrink-0">
       <!-- Dataset Lineage Segmented Control (Raw vs Cleaned) -->
-      <div class="flex items-center bg-warm-100 dark:bg-slate-800 p-0.5 rounded-lg text-xs font-medium border border-warm-200 dark:border-slate-700">
+      <div class="hidden sm:flex items-center bg-warm-100 dark:bg-slate-800 p-0.5 rounded-lg text-xs font-medium border border-warm-200 dark:border-slate-700">
         <button
           onclick={() => viewMode = 'cleaned'}
-          class={`px-2.5 py-1 rounded-md transition ${viewMode === 'cleaned' ? 'bg-white dark:bg-slate-900 text-orange-700 dark:text-orange-400 font-bold shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}>
+          class={`px-2 py-1 rounded-md transition ${viewMode === 'cleaned' ? 'bg-white dark:bg-slate-900 text-orange-700 dark:text-orange-400 font-bold shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
           Cleaned (23)
         </button>
         <button
           onclick={() => viewMode = 'raw'}
-          class={`px-2.5 py-1 rounded-md transition ${viewMode === 'raw' ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-400 font-bold shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}>
+          class={`px-2 py-1 rounded-md transition ${viewMode === 'raw' ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-400 font-bold shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
           Raw (25)
         </button>
       </div>
 
       <!-- Benchmark Date Badge -->
-      <span class="text-[11px] font-mono text-slate-500 bg-warm-100 dark:bg-slate-800 px-2 py-1 rounded border border-warm-200 dark:border-slate-700">
+      <span class="hidden md:inline-block text-[11px] font-mono tabular-nums text-slate-500 bg-warm-100 dark:bg-slate-800 px-2 py-1 rounded border border-warm-200 dark:border-slate-700">
         Benchmark: 2026-11-01
       </span>
 
       <!-- Export CSV with PII Mask Toggle -->
       <div class="flex items-center gap-1.5 bg-warm-100 dark:bg-slate-800 rounded px-2 py-1 border border-warm-200 dark:border-slate-700">
-        <label class="flex items-center gap-1 text-[11px] text-slate-600 dark:text-slate-300 cursor-pointer select-none" title="Mask phone numbers and email addresses on export">
+        <label class="hidden sm:flex items-center gap-1 text-[11px] text-slate-600 dark:text-slate-300 cursor-pointer select-none" title="Mask phone numbers and email addresses on export">
           <input type="checkbox" bind:checked={maskPiiOnExport} class="rounded text-orange-600 w-3 h-3" />
           <span>Mask PII</span>
         </label>
-        <span class="text-slate-300 dark:text-slate-600">|</span>
+        <span class="hidden sm:inline text-slate-300 dark:text-slate-600">|</span>
         <button
           onclick={exportCleanedCsv}
           class="text-xs text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white p-0.5 rounded transition flex items-center gap-1"
@@ -654,40 +653,13 @@
         </button>
       </div>
 
-      <!-- Theme Switcher -->
-      <button
-        onclick={toggleTheme}
-        aria-label="Toggle visual theme"
-        class="p-1.5 rounded text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white hover:bg-warm-100 dark:hover:bg-slate-800 transition">
-        {#if theme === 'dark'}
-          <svg class="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
-        {:else}
-          <svg class="w-4 h-4 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
-        {/if}
-      </button>
-
-      <!-- Authenticated Operator Badge & Logout -->
-      {#if currentUser}
-        <div class="hidden sm:flex items-center gap-2 pl-2 border-l border-warm-200 dark:border-slate-800">
-          <div class="text-right">
-            <div class="text-xs font-semibold text-slate-800 dark:text-slate-200 leading-tight">{currentUser.full_name}</div>
-            <div class="text-[10px] font-mono text-orange-600 dark:text-orange-400 leading-tight">{currentUser.security_tier} · {currentUser.role}</div>
-          </div>
-          <button
-            onclick={handleLogout}
-            class="text-xs px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 font-medium transition"
-            title="Sign out of BIAI Pipeline Control Plane">
-            Sign Out
-          </button>
-        </div>
-      {/if}
-
       <!-- Primary Copilot Trigger (Authentic BIAI Orange Pill) -->
       <button
         onclick={() => activeTab = 'copilot'}
-        class="text-xs font-semibold bg-[#C2410C] hover:bg-[#EA580C] text-white px-4 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm hover:shadow-orange-600/30 active:scale-[0.98] transition">
+        class="text-xs font-semibold bg-[#C2410C] hover:bg-[#EA580C] text-white px-3.5 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm active:scale-[0.98] transition">
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-        <span>Deal Copilot</span>
+        <span class="hidden sm:inline">Deal Copilot</span>
+        <span class="sm:hidden">Copilot</span>
       </button>
     </div>
   </header>
@@ -832,13 +804,13 @@
   <!-- ======================================================== -->
   <!-- 2. RECONCILED FINANCIAL METRICS (100% EXPLICIT LINEAGE)   -->
   <!-- ======================================================== -->
-  <div class="h-10 bg-warm-100/90 dark:bg-slate-900/40 border-b border-warm-200 dark:border-slate-800 px-4 flex items-center justify-between text-xs shrink-0">
-    <div class="flex items-center gap-5 text-slate-600 dark:text-slate-400">
+  <div class="h-10 bg-warm-100/90 dark:bg-slate-900/40 border-b border-warm-200 dark:border-slate-800 px-4 flex items-center justify-between text-xs shrink-0 overflow-x-auto min-w-0">
+    <div class="flex items-center gap-4 text-slate-600 dark:text-slate-400 whitespace-nowrap">
 
       <!-- Contracted Pipeline Value -->
       <div class="flex items-center gap-1.5">
         <span>Contracted Value:</span>
-        <span class="font-bold font-mono text-emerald-700 dark:text-emerald-400 text-sm">
+        <span class="font-bold font-mono tabular-nums text-emerald-700 dark:text-emerald-400 text-sm">
           ৳ {contractedPipelineValue.toLocaleString()} BDT
         </span>
         <span class="text-[10px] uppercase font-semibold px-1 rounded bg-warm-200 dark:bg-slate-800 text-slate-500">
@@ -851,10 +823,9 @@
       <!-- Cash Collected -->
       <div class="flex items-center gap-1.5">
         <span>Cash Collected:</span>
-        <span class="font-bold font-mono text-sky-700 dark:text-sky-400">
+        <span class="font-bold font-mono tabular-nums text-sky-700 dark:text-sky-400">
           ৳ {cashCollected.toLocaleString()} BDT
         </span>
-        <span class="text-[11px] text-slate-400">(L12 Advance)</span>
       </div>
 
       <div class="h-3.5 w-[1px] bg-warm-300 dark:bg-slate-800"></div>
@@ -862,10 +833,9 @@
       <!-- Outstanding Receivables (Invoiced + Paid Due ONLY) -->
       <div class="flex items-center gap-1.5">
         <span>Outstanding Receivables:</span>
-        <span class="font-bold font-mono text-amber-700 dark:text-amber-400">
+        <span class="font-bold font-mono tabular-nums text-amber-700 dark:text-amber-400">
           ৳ {outstandingReceivables.toLocaleString()} BDT
         </span>
-        <span class="text-[11px] text-slate-400">(L07, L22, L12 Tranche 2)</span>
       </div>
 
       <div class="h-3.5 w-[1px] bg-warm-300 dark:bg-slate-800"></div>
@@ -873,14 +843,14 @@
       <!-- Weighted Active Pipeline -->
       <div class="flex items-center gap-1.5">
         <span>Active Weighted:</span>
-        <span class="font-bold font-mono text-slate-800 dark:text-slate-200">
+        <span class="font-bold font-mono tabular-nums text-slate-800 dark:text-slate-200">
           ৳ {activeWeightedPipeline.toLocaleString()} BDT
         </span>
       </div>
     </div>
 
     <!-- Health Flags Alert Strip -->
-    <div class="flex items-center gap-2 font-mono text-[11px]">
+    <div class="flex items-center gap-2 font-mono tabular-nums text-[11px] whitespace-nowrap">
       <span class="px-2 py-0.5 rounded bg-rose-50 text-rose-800 border border-rose-300 dark:bg-rose-950/30 dark:text-rose-300 dark:border-rose-800 flex items-center gap-1">
         <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
         {overdueLeads.length} Overdue Deals
@@ -894,49 +864,55 @@
   <!-- ======================================================== -->
   <!-- 3. THREE-PANE DESKTOP WORKSPACE                           -->
   <!-- ======================================================== -->
-  <div class="flex-1 flex overflow-hidden">
+  <div class="flex-1 flex overflow-hidden min-h-0 relative">
 
     <!-- ------------------------------------------------------ -->
-    <!-- PANE 1: NAVIGATION & SAVED VIEWS (220px Fixed)         -->
+    <!-- PANE 1: NAVIGATION & BOTTOM-LEFT ACCOUNT MODULE (240px) -->
     <!-- ------------------------------------------------------ -->
-    <aside class="w-56 border-r border-warm-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/50 flex flex-col justify-between shrink-0 overflow-y-auto">
-      <div class="p-3 space-y-4">
+    <!-- Desktop Sidebar -->
+    <aside class="hidden lg:flex w-60 border-r border-warm-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/50 flex-col shrink-0 min-h-0">
+      <!-- Scrollable Nav List -->
+      <div class="flex-1 overflow-y-auto overscroll-contain p-3 space-y-4 min-h-0">
         <div>
           <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 mb-1.5">
             Pipeline Views
           </div>
           <nav class="space-y-0.5 text-xs">
             <button
+              type="button"
               onclick={() => activeTab = 'pipeline'}
               class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeTab === 'pipeline' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
               <div class="flex items-center gap-2">
                 <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
                 <span>Active Pipeline</span>
               </div>
-              <span class="font-mono text-[11px] text-slate-500">{displayLeads.length}</span>
+              <span class="font-mono tabular-nums text-[11px] text-slate-500">{displayLeads.length}</span>
             </button>
 
             <button
+              type="button"
               onclick={() => activeTab = 'health'}
               class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeTab === 'health' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
               <div class="flex items-center gap-2">
                 <span class="w-2 h-2 rounded-full bg-amber-500"></span>
                 <span>Data Health Studio</span>
               </div>
-              <span class="font-mono text-[11px] text-amber-700 font-bold">18</span>
+              <span class="font-mono tabular-nums text-[11px] text-amber-700 font-bold">18</span>
             </button>
 
             <button
+              type="button"
               onclick={() => activeTab = 'priority'}
               class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeTab === 'priority' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
               <div class="flex items-center gap-2">
                 <span class="w-2 h-2 rounded-full bg-rose-500"></span>
                 <span>Priority Chase</span>
               </div>
-              <span class="font-mono text-[11px] text-rose-600 font-bold">{overdueLeads.length}</span>
+              <span class="font-mono tabular-nums text-[11px] text-rose-600 font-bold">{overdueLeads.length}</span>
             </button>
 
             <button
+              type="button"
               onclick={() => activeTab = 'copilot'}
               class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeTab === 'copilot' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
               <div class="flex items-center gap-2">
@@ -958,25 +934,93 @@
               {@const count = displayLeads.filter(l => l.stage === st).length}
               <div class="flex items-center justify-between px-2 py-1 text-slate-600 dark:text-slate-400">
                 <span>{st}</span>
-                <span class="font-mono font-semibold">{count}</span>
+                <span class="font-mono tabular-nums font-semibold">{count}</span>
               </div>
             {/each}
           </div>
         </div>
       </div>
 
-      <!-- Left Rail Footer -->
-      <div class="p-3 border-t border-warm-200 dark:border-slate-800 text-[11px] text-slate-400">
-        <a href="/" class="hover:underline flex items-center gap-1">
-          <span>← Back to Task 1 CRM</span>
-        </a>
+      <!-- Account Management Module Fixed at Bottom-Left -->
+      <div class="p-2.5 border-t border-warm-200 dark:border-slate-800 bg-warm-50/50 dark:bg-slate-900/80 shrink-0">
+        <AccountMenu
+          {currentUser}
+          {theme}
+          onToggleTheme={toggleTheme}
+          {audioEnabled}
+          onToggleAudio={toggleAudio}
+          onLogout={handleLogout}
+        />
       </div>
     </aside>
+
+    <!-- Mobile Drawer Overlay (< 1024px) -->
+    {#if mobileNavOpen}
+      <div class="lg:hidden fixed inset-0 z-40 flex">
+        <div
+          role="button"
+          tabindex="0"
+          onclick={() => mobileNavOpen = false}
+          onkeydown={(e) => { if (e.key === 'Escape') mobileNavOpen = false; }}
+          class="fixed inset-0 bg-black/50 backdrop-blur-xs transition-opacity"
+          aria-label="Close navigation overlay"></div>
+
+        <div class="relative w-72 max-w-[80vw] bg-white dark:bg-slate-900 border-r border-warm-200 dark:border-slate-800 flex flex-col h-full shadow-2xl z-50">
+          <div class="p-4 border-b border-warm-200 dark:border-slate-800 flex items-center justify-between">
+            <span class="font-bold text-sm tracking-wider text-slate-900 dark:text-white">PIPELINE NAVIGATION</span>
+            <button
+              type="button"
+              onclick={() => mobileNavOpen = false}
+              class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-sm">✕</button>
+          </div>
+
+          <div class="flex-1 overflow-y-auto overscroll-contain p-3 space-y-4 min-h-0">
+            <nav class="space-y-1 text-xs">
+              <button
+                type="button"
+                onclick={() => { activeTab = 'pipeline'; mobileNavOpen = false; }}
+                class={`w-full text-left px-3 py-2 rounded-lg font-medium ${activeTab === 'pipeline' ? 'bg-orange-600 text-white font-semibold' : 'text-slate-700 dark:text-slate-300'}`}>
+                Active Pipeline
+              </button>
+              <button
+                type="button"
+                onclick={() => { activeTab = 'health'; mobileNavOpen = false; }}
+                class={`w-full text-left px-3 py-2 rounded-lg font-medium ${activeTab === 'health' ? 'bg-orange-600 text-white font-semibold' : 'text-slate-700 dark:text-slate-300'}`}>
+                Data Health Studio
+              </button>
+              <button
+                type="button"
+                onclick={() => { activeTab = 'priority'; mobileNavOpen = false; }}
+                class={`w-full text-left px-3 py-2 rounded-lg font-medium ${activeTab === 'priority' ? 'bg-orange-600 text-white font-semibold' : 'text-slate-700 dark:text-slate-300'}`}>
+                Priority Chase
+              </button>
+              <button
+                type="button"
+                onclick={() => { activeTab = 'copilot'; mobileNavOpen = false; }}
+                class={`w-full text-left px-3 py-2 rounded-lg font-medium ${activeTab === 'copilot' ? 'bg-orange-600 text-white font-semibold' : 'text-slate-700 dark:text-slate-300'}`}>
+                Safe AST Copilot
+              </button>
+            </nav>
+          </div>
+
+          <div class="p-3 border-t border-warm-200 dark:border-slate-800 bg-warm-50/50 dark:bg-slate-900/80 shrink-0">
+            <AccountMenu
+              {currentUser}
+              {theme}
+              onToggleTheme={toggleTheme}
+              {audioEnabled}
+              onToggleAudio={toggleAudio}
+              onLogout={handleLogout}
+            />
+          </div>
+        </div>
+      </div>
+    {/if}
 
     <!-- ------------------------------------------------------ -->
     <!-- PANE 2: STAGE BOARD OR HIGH-DENSITY TABLE (FLEX-1)     -->
     <!-- ------------------------------------------------------ -->
-    <section class="flex-1 border-r border-warm-200 dark:border-slate-800 bg-warm-50 dark:bg-slate-950 flex flex-col overflow-hidden">
+    <section class="flex-1 border-r border-warm-200 dark:border-slate-800 bg-warm-50 dark:bg-slate-950 flex flex-col overflow-hidden min-h-0">
 
       <!-- Toolbar: View Switcher (Board vs Table) -->
       <div class="h-10 border-b border-warm-200 dark:border-slate-800 px-4 flex items-center justify-between bg-white dark:bg-slate-900 text-xs shrink-0">
@@ -984,50 +1028,50 @@
           <span class="font-semibold text-slate-800 dark:text-slate-200">
             {activeTab === 'pipeline' ? 'Corporate Pipeline Workspace' : activeTab === 'health' ? 'Data Hygiene & Audit Studio' : activeTab === 'priority' ? 'Priority Overdue Chase' : 'AST Query Engine'}
           </span>
-          <span class="text-[11px] text-slate-400">({filteredLeads.length} leads in view)</span>
+          <span class="text-[11px] text-slate-400 tabular-nums">({filteredLeads.length} leads in view)</span>
         </div>
 
         <!-- Board vs Table Toggle -->
         <div class="flex items-center gap-1 bg-warm-100 dark:bg-slate-800 p-0.5 rounded-md text-[11px]">
           <button
             onclick={() => layoutMode = 'board'}
-            class={`px-2 py-0.5 rounded font-medium transition ${layoutMode === 'board' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}>
+            class={`px-2 py-0.5 rounded font-medium transition ${layoutMode === 'board' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
             Active Stages Board
           </button>
           <button
             onclick={() => layoutMode = 'table'}
-            class={`px-2 py-0.5 rounded font-medium transition ${layoutMode === 'table' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}>
+            class={`px-2 py-0.5 rounded font-medium transition ${layoutMode === 'table' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
             Data Health Table
           </button>
         </div>
       </div>
 
       <!-- Main Surface: Board or Table -->
-      <div class="flex-1 overflow-auto p-4">
+      <div class="flex-1 overflow-auto overscroll-contain p-4 min-h-0">
         {#if layoutMode === 'board'}
           <!-- 4-COLUMN ACTIVE STAGE WORKSPACE + CLOSED DEALS SECTION -->
           <div class="space-y-4">
-            <div class="grid grid-cols-4 gap-3 items-start">
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 items-start">
               {#each ['Contacted', 'Meeting', 'Proposal', 'Invoice sent'] as stage}
                 {@const stageLeads = filteredLeads.filter(l => l.stage === stage)}
                 {@const stageSum = stageLeads.reduce((s, l) => s + (l.deal_value_bdt || 0), 0)}
 
-                <div class="bg-warm-100/70 dark:bg-slate-900/60 border border-warm-200 dark:border-slate-800 rounded-xl flex flex-col max-h-[calc(100vh-190px)]">
+                <div class="kanban-column bg-warm-100/70 dark:bg-slate-900/60 border border-warm-200 dark:border-slate-800 rounded-xl flex flex-col max-h-[calc(100vh-190px)] min-h-0">
                   <!-- Stage Header -->
-                  <div class="p-3 border-b border-warm-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-t-xl flex items-center justify-between">
+                  <div class="p-3 border-b border-warm-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-t-xl flex items-center justify-between shrink-0">
                     <div>
                       <span class="font-semibold text-xs text-slate-800 dark:text-white uppercase tracking-wider">{stage}</span>
                       {#if stageSum > 0}
-                        <p class="text-[11px] font-mono font-bold text-emerald-700 dark:text-emerald-400">৳ {stageSum.toLocaleString()}</p>
+                        <p class="text-[11px] font-mono tabular-nums font-bold text-emerald-700 dark:text-emerald-400">৳ {stageSum.toLocaleString()}</p>
                       {/if}
                     </div>
-                    <span class="text-xs font-mono bg-warm-100 dark:bg-slate-800 px-1.5 py-0.5 rounded font-semibold text-slate-600 dark:text-slate-300">
+                    <span class="text-xs font-mono tabular-nums bg-warm-100 dark:bg-slate-800 px-1.5 py-0.5 rounded font-semibold text-slate-600 dark:text-slate-300">
                       {stageLeads.length}
                     </span>
                   </div>
 
                   <!-- Cards Container -->
-                  <div class="p-2 overflow-y-auto space-y-2 flex-1">
+                  <div class="p-2 overflow-y-auto overscroll-contain space-y-2 flex-1 min-h-0">
                     {#if stageLeads.length === 0}
                       <div class="py-8 text-center text-slate-400 text-xs italic">
                         No deals in {stage}
@@ -1039,27 +1083,24 @@
                         {@const isDueToday = lead.next_followup === BENCHMARK_DATE}
                         {@const daysOverdue = isOverdue && lead.next_followup ? Math.round((new Date(BENCHMARK_DATE).getTime() - new Date(lead.next_followup).getTime()) / (86400000)) : 0}
                         {@const daysUntilDue = !isOverdue && lead.next_followup ? Math.round((new Date(lead.next_followup).getTime() - new Date(BENCHMARK_DATE).getTime()) / (86400000)) : 99}
-                        {@const urgencyGlowClass = daysOverdue >= 2
-                          ? 'border-red-600 shadow-[0_0_18px_rgba(220,38,38,0.45)] ring-2 ring-red-500/60 animate-pulse bg-red-50/40 dark:bg-red-950/25'
-                          : daysOverdue === 1
-                            ? 'border-rose-500 shadow-[0_0_14px_rgba(225,29,72,0.35)] ring-1 ring-rose-400/50 bg-rose-50/30 dark:bg-rose-950/20'
-                            : isDueToday
-                              ? 'border-orange-500 shadow-[0_0_14px_rgba(234,88,12,0.4)] ring-1 ring-orange-500/60 animate-pulse bg-orange-50/30 dark:bg-orange-950/20'
-                              : daysUntilDue <= 2
-                                ? 'border-amber-400 shadow-[0_0_10px_rgba(217,119,6,0.25)] ring-1 ring-amber-400/40 bg-amber-50/20 dark:bg-amber-950/10'
-                                : ''}
+                        {@const urgency = isOverdue
+                          ? 'critical'
+                          : isDueToday || daysUntilDue <= 2
+                            ? 'at-risk'
+                            : lead.stage === 'Paid'
+                              ? 'met'
+                              : 'healthy'}
+                        {@const meta = urgencyPresentation[urgency]}
 
                         <div
                           role="button"
                           tabindex="0"
                           onclick={() => selectLead(lead.id)}
-                          onkeydown={(e) => { if (e.key === 'Enter') selectLead(lead.id); }}
-                          class={`group relative w-full text-left p-3.5 rounded-xl border transition-all duration-200 cursor-pointer hover:shadow-md ${
-                            isOverdue ? 'rail-overdue' : 'rail-healthy'
-                          } ${urgencyGlowClass} ${
+                          onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectLead(lead.id); } }}
+                          class={`work-card group relative w-full text-left p-3.5 rounded-xl border transition-colors duration-150 cursor-pointer ${meta.railClass} ${
                             isSelected
-                              ? 'bg-orange-50/80 border-orange-400 dark:bg-orange-950/30 dark:border-orange-700 shadow-sm'
-                              : 'bg-white hover:bg-warm-100/70 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-850'
+                              ? 'bg-orange-50/80 border-orange-400 dark:bg-orange-950/30 dark:border-orange-700 ring-2 ring-orange-600/50 dark:ring-orange-500/50'
+                              : 'bg-white hover:bg-warm-100/70 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-850 hover:border-warm-300 dark:hover:border-slate-700'
                           }`}>
 
                           <div class="flex items-start justify-between gap-1">
@@ -1067,11 +1108,8 @@
                               <span class="font-semibold text-xs text-slate-900 dark:text-white truncate">
                                 {lead.company}
                               </span>
-                              {#if daysOverdue >= 3}
-                                <span class="w-1.5 h-1.5 rounded-full bg-red-500 inline-block ml-1 animate-ping"></span>
-                              {/if}
                             </div>
-                            <span class="font-mono text-xs font-semibold text-emerald-700 dark:text-emerald-400 shrink-0">
+                            <span class="font-mono tabular-nums text-xs font-semibold text-emerald-700 dark:text-emerald-400 shrink-0">
                               ৳ {(lead.deal_value_bdt || 0).toLocaleString()}
                             </span>
                           </div>
@@ -1080,32 +1118,23 @@
                             {lead.contact_name || 'Missing contact'} · {lead.industry}
                           </div>
 
-                          <!-- Dynamic Hover Metadata Peek: reveals contact & prompt on hover -->
-                          <div class="hidden group-hover:flex flex-col gap-1 text-[11px] py-1.5 px-2 my-2 rounded bg-warm-100/90 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border border-warm-200 dark:border-slate-700/60 transition-all">
-                            <div class="flex items-center justify-between font-mono text-[10px]">
-                              <span>{lead.contact_phone || 'No phone'}</span>
-                              <span class="truncate max-w-[130px]">{lead.contact_email || 'No email'}</span>
-                            </div>
-                            {#if lead.notes}
-                              <p class="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-2 italic">
-                                "{lead.notes}"
-                              </p>
-                            {/if}
-                            <span class="text-[10px] text-orange-600 dark:text-orange-400 font-medium">Inspect Deal Studio ↵</span>
-                          </div>
-
-                          <!-- Next Followup Pill -->
-                          <div class="flex items-center justify-between text-[10px] mt-2 pt-1 border-t border-warm-100 dark:border-slate-800 font-mono">
+                          <!-- Next Followup Pill with Stable Semantic Badge -->
+                          <div class="flex items-center justify-between text-[10px] mt-2 pt-1 border-t border-warm-100 dark:border-slate-800 font-mono tabular-nums">
                             <span class="text-slate-400">Due: {lead.next_followup || 'No date'}</span>
-                            {#if daysOverdue >= 3}
-                              <span class="px-1.5 py-0.2 rounded font-bold bg-rose-600 text-white">⚠️ Overdue {daysOverdue}d</span>
-                            {:else if daysOverdue >= 1}
-                              <span class="text-rose-700 dark:text-rose-300 font-semibold">Overdue {daysOverdue}d</span>
-                            {:else if isDueToday}
-                              <span class="px-1.5 py-0.2 rounded font-bold bg-orange-500 text-white animate-pulse">Due Today</span>
-                            {:else}
-                              <span class="text-slate-500">In SLA</span>
-                            {/if}
+                            <span class={`px-1.5 py-0.5 rounded border text-[10px] font-medium flex items-center gap-1 ${meta.badgeClass}`}>
+                              {#if urgency === 'critical'}
+                                <svg class="w-2.5 h-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                                <span>Overdue {daysOverdue}d</span>
+                              {:else if urgency === 'at-risk'}
+                                <svg class="w-2.5 h-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                <span>{isDueToday ? 'Due Today' : `Due in ${daysUntilDue}d`}</span>
+                              {:else if urgency === 'met'}
+                                <svg class="w-2.5 h-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                <span>Paid</span>
+                              {:else}
+                                <span>In SLA</span>
+                              {/if}
+                            </span>
                           </div>
                         </div>
                       {/each}
@@ -1116,10 +1145,10 @@
             </div>
 
             <!-- COMPRESSED TERMINAL DEALS (PAID & LOST) -->
-            <div class="bg-warm-100/60 dark:bg-slate-900/40 border border-warm-200 dark:border-slate-800 rounded-xl p-3 flex items-center justify-between text-xs">
-              <div class="flex items-center gap-4">
+            <div class="bg-warm-100/60 dark:bg-slate-900/40 border border-warm-200 dark:border-slate-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div class="flex flex-wrap items-center gap-3">
                 <span class="font-semibold text-slate-700 dark:text-slate-300">Terminal Deals:</span>
-                <span class="text-emerald-700 dark:text-emerald-400 font-mono">
+                <span class="text-emerald-700 dark:text-emerald-400 font-mono tabular-nums">
                   Paid (1): L12 Eastern Cable · ৳ 150k Collected, ৳ 150k Due
                 </span>
                 <span>·</span>
@@ -1154,22 +1183,24 @@
                   {@const hasTypo = lead.id === 'L18' && lead.contact_email?.includes('bogurateXtile')}
 
                   <tr
+                    tabindex="0"
                     onclick={() => selectedLeadId = lead.id}
+                    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectedLeadId = lead.id; } }}
                     class={`cursor-pointer transition ${isSelected ? 'bg-orange-50/70 dark:bg-orange-950/20' : 'hover:bg-warm-50 dark:hover:bg-slate-850'}`}>
-                    <td class="p-2.5 font-mono font-bold text-orange-700 dark:text-orange-400">{lead.id}</td>
+                    <td class="p-2.5 font-mono tabular-nums font-bold text-orange-700 dark:text-orange-400">{lead.id}</td>
                     <td class="p-2.5">
                       <div class="font-semibold text-slate-900 dark:text-white">{lead.company}</div>
                       <div class="text-[11px] text-slate-400">{lead.industry}</div>
                     </td>
                     <td class="p-2.5">
                       <div>{lead.contact_name || 'Missing name'}</div>
-                      <div class="text-[11px] text-slate-400 font-mono">{lead.contact_phone || 'Missing phone'}</div>
+                      <div class="text-[11px] text-slate-400 font-mono tabular-nums">{lead.contact_phone || 'Missing phone'}</div>
                     </td>
                     <td class="p-2.5 font-medium">{lead.stage}</td>
-                    <td class="p-2.5 text-right font-mono font-bold text-emerald-700 dark:text-emerald-400">
+                    <td class="p-2.5 text-right font-mono tabular-nums font-bold text-emerald-700 dark:text-emerald-400">
                       ৳ {(lead.deal_value_bdt || 0).toLocaleString()}
                     </td>
-                    <td class="p-2.5 font-mono">
+                    <td class="p-2.5 font-mono tabular-nums">
                       <span class={isOverdue ? 'text-rose-600 font-bold' : 'text-slate-600 dark:text-slate-400'}>
                         {lead.next_followup || 'None'}
                       </span>
@@ -1194,18 +1225,21 @@
                     <td class="p-2.5 text-right">
                       {#if hasInversion}
                         <button
+                          type="button"
                           onclick={(e) => { e.stopPropagation(); remediateDateOrder('L25', 'SWAP'); }}
                           class="px-2 py-1 rounded text-[10px] font-semibold bg-purple-600 hover:bg-purple-500 text-white">
                           Swap Dates
                         </button>
                       {:else if hasTypo}
                         <button
+                          type="button"
                           onclick={(e) => { e.stopPropagation(); fixEmailTypo('L18'); }}
                           class="px-2 py-1 rounded text-[10px] font-semibold bg-amber-600 hover:bg-amber-500 text-white">
                           Fix Typo
                         </button>
                       {:else}
                         <button
+                          type="button"
                           onclick={(e) => { e.stopPropagation(); selectedLeadId = lead.id; }}
                           class="px-2 py-1 rounded text-[10px] font-medium bg-warm-100 hover:bg-warm-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
                           Inspect
@@ -1224,17 +1258,17 @@
     <!-- ------------------------------------------------------ -->
     <!-- PANE 3: LEAD DETAIL & REMEDIATION STUDIO (420px Fixed) -->
     <!-- ------------------------------------------------------ -->
-    <main class="w-[420px] bg-white dark:bg-slate-900 flex flex-col shrink-0 overflow-y-auto">
+    <main class="detail-panel w-full lg:w-[400px] xl:w-[420px] bg-white dark:bg-slate-900 flex flex-col shrink-0 min-h-0 overflow-y-auto overscroll-contain">
       {#if !selectedLead}
         <div class="m-auto text-center py-20 text-slate-400 text-xs">
           Select a lead to inspect details.
         </div>
       {:else}
         <!-- Inspector Header -->
-        <div class="p-4 border-b border-warm-200 dark:border-slate-800 bg-warm-50/50 dark:bg-slate-900/60">
+        <div class="p-4 border-b border-warm-200 dark:border-slate-800 bg-warm-50/50 dark:bg-slate-900/60 shrink-0">
           <div class="flex items-center justify-between">
-            <span class="font-mono text-xs font-bold text-orange-700 dark:text-orange-400">{selectedLead.id}</span>
-            <span class="font-mono text-sm font-bold text-emerald-700 dark:text-emerald-400">
+            <span class="font-mono tabular-nums text-xs font-bold text-orange-700 dark:text-orange-400">{selectedLead.id}</span>
+            <span class="font-mono tabular-nums text-sm font-bold text-emerald-700 dark:text-emerald-400">
               ৳ {(selectedLead.deal_value_bdt || 0).toLocaleString()} BDT
             </span>
           </div>
@@ -1256,7 +1290,7 @@
         </div>
 
         <!-- Inspector Body -->
-        <div class="p-4 space-y-4 text-xs">
+        <div class="p-4 space-y-4 text-xs flex-1">
           <!-- Contact Dossier -->
           <div class="bg-warm-50 dark:bg-slate-850 p-3 rounded-lg border border-warm-200 dark:border-slate-800 space-y-1.5">
             <div class="font-semibold text-slate-700 dark:text-slate-300">Contact Details</div>
@@ -1269,7 +1303,7 @@
             <div class="font-mono text-[11px] text-slate-500">
               Email: {selectedLead.contact_email || 'Missing email'}
             </div>
-            <div class="font-mono text-[11px] text-slate-500">
+            <div class="font-mono tabular-nums text-[11px] text-slate-500">
               Phone: {selectedLead.contact_phone || 'Missing phone'}
             </div>
           </div>
@@ -1282,6 +1316,7 @@
                 Last Contact ({selectedLead.last_contact}) is after Next Followup ({selectedLead.next_followup}).
               </p>
               <button
+                type="button"
                 onclick={() => remediateDateOrder('L25', 'SWAP')}
                 class="mt-2 text-xs font-semibold bg-purple-600 hover:bg-purple-500 text-white px-3 py-1 rounded">
                 Swap Dates
@@ -1296,6 +1331,7 @@
                 Domain contains uppercase typo: <code>bogurateXtile.com</code>
               </p>
               <button
+                type="button"
                 onclick={() => fixEmailTypo('L18')}
                 class="mt-2 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white px-3 py-1 rounded">
                 Fix Typo
@@ -1342,14 +1378,22 @@
 
                   <div class="flex gap-2">
                     <button
+                      type="button"
                       onclick={() => copyText(emailDraft?.body || '', 'Email draft')}
                       class="flex-1 text-xs font-semibold bg-warm-200 hover:bg-warm-300 text-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-white py-1.5 rounded transition">
                       📋 Copy Draft
                     </button>
                     <button
+                      type="button"
                       onclick={dispatchEmail}
-                      class="flex-1 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white py-1.5 rounded transition flex items-center justify-center gap-1 shadow-xs">
-                      🚀 Dispatch Email
+                      disabled={isSendingEmail}
+                      class="flex-1 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white py-1.5 rounded transition flex items-center justify-center gap-1.5 shadow-xs disabled:opacity-50">
+                      {#if isSendingEmail}
+                        <div class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <span>Dispatching...</span>
+                      {:else}
+                        <span>🚀 Dispatch Email</span>
+                      {/if}
                     </button>
                   </div>
                 </div>
@@ -1362,10 +1406,20 @@
   </div>
   {/if}
 
-  <!-- Toast Notification Feedback -->
+  <!-- Toast Notification Feedback (Calm & Accessible Live Region) -->
   {#if feedbackMessage}
-    <div class="fixed bottom-4 right-4 bg-slate-900 text-white dark:bg-white dark:text-slate-950 px-4 py-2 rounded-lg text-xs font-medium shadow-lg z-50">
-      {feedbackMessage}
+    <div
+      role="status"
+      aria-live="polite"
+      class="fixed bottom-4 right-4 bg-slate-900 text-white dark:bg-white dark:text-slate-950 px-4 py-2.5 rounded-xl text-xs font-medium shadow-xl z-50 flex items-center gap-2.5 border border-slate-700 dark:border-slate-200 transition-all duration-180">
+      <span>{feedbackMessage}</span>
+      <button
+        type="button"
+        onclick={() => feedbackMessage = null}
+        class="text-slate-400 hover:text-white dark:hover:text-slate-900 text-sm ml-1"
+        aria-label="Dismiss notification">
+        ✕
+      </button>
     </div>
   {/if}
 </div>
