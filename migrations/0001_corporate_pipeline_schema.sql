@@ -198,7 +198,8 @@ CREATE TABLE IF NOT EXISTS audit_events (
         'DATE_ORDER_REMEDIATED',
         'PAYMENT_STATUS_UPDATED',
         'EMAIL_APPROVED_DISPATCHED',
-        'CLEANED_CSV_EXPORTED'
+        'CLEANED_CSV_EXPORTED',
+        'EMAIL_TYPO_NORMALIZED'
     )),
     entity_id TEXT NOT NULL,
     before_state_json TEXT,

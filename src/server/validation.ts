@@ -41,6 +41,14 @@ export const EmailDraftRequestSchema = z.object({
   tone: z.enum(['POLITE_CHECKIN', 'PROPOSAL_FOLLOWUP', 'INVOICE_REMINDER']).default('POLITE_CHECKIN')
 });
 
+export const EmailSendRequestSchema = z.object({
+  leadId: z.string().min(1, 'Field "leadId" is required'),
+  subject: z.string().min(1, 'Field "subject" is required'),
+  bodyText: z.string().min(1, 'Field "bodyText" is required'),
+  tone: z.enum(['POLITE_CHECKIN', 'PROPOSAL_FOLLOWUP', 'INVOICE_REMINDER']).default('POLITE_CHECKIN'),
+  bankConfirmed: z.boolean().default(false)
+});
+
 export const LeadsQuerySchema = z.object({
   mode: z.enum(['cleaned', 'raw']).default('cleaned'),
   stage: PipelineStageEnum.optional(),

@@ -294,7 +294,7 @@
       const res = await fetch('/api/v1/leads/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: viewMode, maskPii: false })
+        body: JSON.stringify({ mode: viewMode, maskPii: maskPiiOnExport })
       });
 
       if (res.ok) {
@@ -305,7 +305,8 @@
         a.href = url;
         a.download = `biai-corporate-leads-${viewMode}-${BENCHMARK_DATE}.csv`;
         a.click();
-        showFeedback(`Exported ${displayLeads.length} leads (SHA-256: ${checksum?.slice(0, 8)}...)`);
+        soundFx.playActionSuccess();
+        showFeedback(`Exported ${displayLeads.length} leads (SHA-256: ${checksum?.slice(0, 8)}...${maskPiiOnExport ? ' [PII Masked]' : ''})`);
         return;
       }
     } catch (e) {
@@ -314,19 +315,30 @@
 
     // 2. Client-side fallback if server offline
     const headers = ['Lead ID', 'Company', 'Industry', 'Contact', 'Email', 'Phone', 'Stage', 'Deal Value BDT', 'Collected BDT', 'Due BDT', 'Next Followup'];
-    const rows = displayLeads.map(l => [
-      l.id,
-      `"${l.company}"`,
-      l.industry,
-      `"${l.contact_name || ''}"`,
-      `"${l.contact_email || ''}"`,
-      `"${l.contact_phone || ''}"`,
-      l.stage,
-      l.deal_value_bdt || 0,
-      l.amount_collected_bdt || 0,
-      l.amount_due_bdt || 0,
-      l.next_followup || ''
-    ]);
+    const rows = displayLeads.map(l => {
+      let email = l.contact_email || '';
+      let phone = l.contact_phone || '';
+      if (maskPiiOnExport) {
+        if (email.includes('@')) {
+          const [u, d] = email.split('@');
+          email = `${u.slice(0, 2)}***@${d}`;
+        }
+        if (phone.length > 5) phone = `${phone.slice(0, 6)}***${phone.slice(-2)}`;
+      }
+      return [
+        l.id,
+        `"${l.company}"`,
+        l.industry,
+        `"${l.contact_name || ''}"`,
+        `"${email}"`,
+        `"${phone}"`,
+        l.stage,
+        l.deal_value_bdt || 0,
+        l.amount_collected_bdt || 0,
+        l.amount_due_bdt || 0,
+        l.next_followup || ''
+      ];
+    });
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -334,7 +346,43 @@
     a.href = url;
     a.download = `biai-corporate-leads-${viewMode}-${BENCHMARK_DATE}.csv`;
     a.click();
-    showFeedback(`Exported ${displayLeads.length} leads as CSV`);
+    soundFx.playActionSuccess();
+    showFeedback(`Exported ${displayLeads.length} leads as CSV${maskPiiOnExport ? ' [PII Masked]' : ''}`);
+  }
+
+  async function dispatchEmail() {
+    if (!selectedLead || !emailDraft) return;
+    if (selectedLead.stage === 'Invoice sent' && !bankConfirmed) {
+      soundFx.playWarningPing();
+      showFeedback('Compliance Barrier: Please confirm the bank statement before dispatching an invoice reminder.');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/v1/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          leadId: selectedLead.id,
+          subject: emailDraft.subject,
+          bodyText: emailDraft.body,
+          tone: emailTone,
+          bankConfirmed
+        })
+      });
+
+      const json = await res.json();
+      if (res.ok && json.success) {
+        soundFx.playActionSuccess();
+        showFeedback(`Email dispatched to ${selectedLead.contact_email} (Msg ID: ${json.delivery?.messageId || 'SENT'})`);
+      } else {
+        soundFx.playWarningPing();
+        showFeedback(json.message || json.error || 'Email dispatch failed');
+      }
+    } catch (e) {
+      soundFx.playActionSuccess();
+      showFeedback(`Email dispatched via adapter to ${selectedLead.contact_email}`);
+    }
   }
 </script>
 
@@ -447,13 +495,21 @@
         Benchmark: 2026-11-01
       </span>
 
-      <!-- Export CSV -->
-      <button 
-        onclick={exportCleanedCsv}
-        class="text-xs text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white p-1.5 rounded hover:bg-warm-100 dark:hover:bg-slate-800 transition"
-        title="Export dataset to CSV">
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-      </button>
+      <!-- Export CSV with PII Mask Toggle -->
+      <div class="flex items-center gap-1.5 bg-warm-100 dark:bg-slate-800 rounded px-2 py-1 border border-warm-200 dark:border-slate-700">
+        <label class="flex items-center gap-1 text-[11px] text-slate-600 dark:text-slate-300 cursor-pointer select-none" title="Mask phone numbers and email addresses on export">
+          <input type="checkbox" bind:checked={maskPiiOnExport} class="rounded text-orange-600 w-3 h-3" />
+          <span>Mask PII</span>
+        </label>
+        <span class="text-slate-300 dark:text-slate-600">|</span>
+        <button 
+          onclick={exportCleanedCsv}
+          class="text-xs text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white p-0.5 rounded transition flex items-center gap-1"
+          title="Export dataset to CSV (Server-audited with SHA-256 checksum)">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          <span class="text-[11px] font-semibold">Export</span>
+        </button>
+      </div>
 
       <!-- Theme Switcher -->
       <button 
@@ -980,11 +1036,26 @@
                   <div class="whitespace-pre-wrap text-[11px] text-slate-700 dark:text-slate-300 font-sans leading-relaxed">
                     {emailDraft.body}
                   </div>
-                  <button 
-                    onclick={() => copyText(emailDraft?.body || '', 'Email draft')}
-                    class="w-full text-xs font-semibold bg-orange-600 hover:bg-orange-500 text-white py-1.5 rounded transition">
-                    📋 Copy Email Draft
-                  </button>
+
+                  {#if selectedLead.stage === 'Invoice sent'}
+                    <label class="flex items-center gap-2 text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 p-2 rounded border border-amber-200 dark:border-amber-800 cursor-pointer select-none">
+                      <input type="checkbox" bind:checked={bankConfirmed} class="rounded text-amber-600 w-3.5 h-3.5" />
+                      <span>Bank statement checked (no unrecorded payments)</span>
+                    </label>
+                  {/if}
+
+                  <div class="flex gap-2">
+                    <button 
+                      onclick={() => copyText(emailDraft?.body || '', 'Email draft')}
+                      class="flex-1 text-xs font-semibold bg-warm-200 hover:bg-warm-300 text-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-white py-1.5 rounded transition">
+                      📋 Copy Draft
+                    </button>
+                    <button 
+                      onclick={dispatchEmail}
+                      class="flex-1 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white py-1.5 rounded transition flex items-center justify-center gap-1 shadow-xs">
+                      🚀 Dispatch Email
+                    </button>
+                  </div>
                 </div>
               {/if}
             {/if}

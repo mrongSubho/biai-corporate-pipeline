@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import { auditCorporateLeads } from '../lib/engine/hygiene.ts';
 import { executeCopilotQuery } from '../lib/engine/copilot.ts';
 import { generateCorporateFollowupEmail } from '../lib/engine/email_drafter.ts';
+import { sendCorporateEmail } from './adapters/resend.ts';
 import { authMiddleware, requireRole, type AuthenticatedCorporateUser } from './auth.ts';
 import { PipelineRepository } from './db/repository.ts';
 import {
@@ -13,6 +14,7 @@ import {
   FixTypoSchema,
   CopilotQueryRequestSchema,
   EmailDraftRequestSchema,
+  EmailSendRequestSchema,
   LeadsQuerySchema
 } from './validation.ts';
 
@@ -244,6 +246,82 @@ app.post('/api/v1/email/draft', async (c) => {
 
   const draft = generateCorporateFollowupEmail({ lead, tone });
   return c.json({ success: true, draft });
+});
+
+// 10.1 Outbound Email Dispatch with Policy Enforcement & D1 Logging
+app.post('/api/v1/email/send', requireRole(['ADMIN', 'SALES_MANAGER', 'ACCOUNT_EXECUTIVE']), async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const validation = EmailSendRequestSchema.safeParse(body);
+  if (!validation.success) {
+    return c.json({ error: 'Validation error', details: validation.error.format() }, 400);
+  }
+
+  const { leadId, subject, bodyText, tone, bankConfirmed } = validation.data;
+  const summary = await PipelineRepository.getLeads(c.env?.DB, 'raw');
+  const lead = summary.leads.find(l => l.id === leadId);
+
+  if (!lead) return c.json({ error: `Lead ${leadId} not found` }, 404);
+
+  // Policy Barrier: Invoiced deals require explicit bank confirmation before reminder dispatch
+  if (lead.stage === 'Invoice sent' && !bankConfirmed) {
+    return c.json({
+      error: 'POLICY_BARRIER_VIOLATION',
+      message: 'Finance policy requires bank statement confirmation before chasing an invoiced customer to avoid embarrassing double-billing.'
+    }, 422);
+  }
+
+  const actor = c.get('actor');
+  const sendResult = await sendCorporateEmail({
+    recipientEmail: lead.contact_email || 'client@example.com',
+    recipientName: lead.contact_name || lead.company,
+    subject,
+    bodyText,
+    apiKey: (c.env as any)?.RESEND_API_KEY
+  });
+
+  if (c.env?.DB) {
+    try {
+      const emailId = `em_${Date.now()}`;
+      const dbLead = await c.env.DB.prepare('SELECT id FROM canonical_leads WHERE lead_id_display = ? OR id = ?').bind(leadId, leadId).first();
+      const canonicalPk = dbLead?.id || (leadId.startsWith('can_') ? leadId : `can_${leadId}`);
+
+      await c.env.DB.batch([
+        c.env.DB.prepare(`
+          INSERT INTO outbound_emails (id, workspace_id, lead_id, recipient_email, recipient_name, subject, body_text, tone, status, approved_by, sent_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SENT', ?, datetime('now'))
+        `).bind(
+          emailId,
+          actor.workspace_id,
+          canonicalPk,
+          lead.contact_email || 'client@example.com',
+          lead.contact_name || lead.company,
+          subject,
+          bodyText,
+          tone,
+          actor.id
+        ),
+        c.env.DB.prepare(`
+          INSERT INTO audit_events (workspace_id, actor_id, actor_type, actor_role, event_type, entity_id, before_state_json, after_state_json, metadata_json)
+          VALUES (?, ?, 'USER', ?, 'EMAIL_APPROVED_DISPATCHED', ?, NULL, ?, ?)
+        `).bind(
+          actor.workspace_id,
+          actor.id,
+          actor.role,
+          lead.id,
+          JSON.stringify({ status: 'SENT', recipient: lead.contact_email }),
+          JSON.stringify({ message_id: sendResult.messageId, provider: sendResult.provider })
+        )
+      ]);
+    } catch (e) {
+      console.error('Failed to persist outbound email in D1:', e);
+    }
+  }
+
+  return c.json({
+    success: true,
+    message: `Follow-up email dispatched successfully to ${lead.contact_email}`,
+    delivery: sendResult
+  });
 });
 
 // 11. Server-Controlled Role-Gated Export with Checksum & Audit
