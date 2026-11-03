@@ -549,7 +549,7 @@
       <nav class="hidden md:flex items-center gap-1 text-xs font-medium">
         <!-- Switch to Task 1 CRM Triage -->
         <a
-          href="/"
+          href="https://biaicrm.mrong.tech"
           title="Switch to CRM Triage workspace"
           class="py-4 px-3 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition">
           CRM Triage

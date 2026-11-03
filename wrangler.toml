@@ -4,6 +4,10 @@ compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = false
 
+routes = [
+  { pattern = "biaileads.mrong.tech", custom_domain = true }
+]
+
 [triggers]
 crons = ["*/5 * * * *"]
 
@@ -28,3 +32,4 @@ ENVIRONMENT = "production"
 DEFAULT_TIMEZONE = "Asia/Dhaka"
 BENCHMARK_DATE = "2026-11-01"
 WORKSPACE_ID = "ws_biai_b2b"
+ALLOWED_ORIGINS = "https://biaileads.mrong.tech,https://biaicrm.mrong.tech"
