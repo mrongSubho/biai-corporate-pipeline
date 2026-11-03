@@ -20,7 +20,7 @@ export const urgencyPresentation: Record<Urgency, UrgencyMeta> = {
     label: 'Critical / P0',
     color: 'danger',
     railClass: 'rail-critical',
-    badgeClass: 'bg-rose-50 text-rose-800 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800',
+    badgeClass: 'text-rose-600 dark:text-rose-400 font-semibold',
     icon: 'alert-triangle'
   },
   'at-risk': {
@@ -28,7 +28,7 @@ export const urgencyPresentation: Record<Urgency, UrgencyMeta> = {
     label: 'At risk',
     color: 'warning',
     railClass: 'rail-at-risk',
-    badgeClass: 'bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800',
+    badgeClass: 'text-amber-600 dark:text-amber-400 font-semibold',
     icon: 'clock-3'
   },
   healthy: {
@@ -36,7 +36,7 @@ export const urgencyPresentation: Record<Urgency, UrgencyMeta> = {
     label: 'In SLA',
     color: 'neutral',
     railClass: 'rail-healthy',
-    badgeClass: 'bg-warm-100 text-slate-700 border-warm-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
+    badgeClass: 'text-slate-400 dark:text-slate-500 font-normal',
     icon: 'check'
   },
   met: {
@@ -44,7 +44,7 @@ export const urgencyPresentation: Record<Urgency, UrgencyMeta> = {
     label: 'Met',
     color: 'success',
     railClass: 'rail-met',
-    badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800',
+    badgeClass: 'text-emerald-600 dark:text-emerald-400 font-semibold',
     icon: 'check-check'
   }
 };
