@@ -10,9 +10,9 @@ VALUES ('ws_biai_b2b', 'BIAI Enterprise Solutions', 'BDT', '2026-11-01');
 -- 2. Staff Users
 INSERT OR IGNORE INTO users (id, workspace_id, email, full_name, role, password_hash)
 VALUES
-  ('usr_b2b_admin', 'ws_biai_b2b', 'admin@biai.com.bd', 'Tariq Mansoor', 'ADMIN', 'mock_hash_admin'),
-  ('usr_b2b_mgr', 'ws_biai_b2b', 'shakib@biai.com.bd', 'Shakib Rahman', 'SALES_MANAGER', 'mock_hash_mgr'),
-  ('usr_b2b_ae', 'ws_biai_b2b', 'ayesha@biai.com.bd', 'Ayesha Siddika', 'ACCOUNT_EXECUTIVE', 'mock_hash_ae');
+  ('usr_b2b_admin', 'ws_biai_b2b', 'admin@biai.com.bd', 'Tariq Mansoor', 'ADMIN', 'disabled_pending_bootstrap'),
+  ('usr_b2b_mgr', 'ws_biai_b2b', 'shakib@biai.com.bd', 'Shakib Rahman', 'SALES_MANAGER', 'disabled_pending_bootstrap'),
+  ('usr_b2b_ae', 'ws_biai_b2b', 'ayesha@biai.com.bd', 'Ayesha Siddika', 'ACCOUNT_EXECUTIVE', 'disabled_pending_bootstrap');
 
 -- 2.1 Initial Evaluator / Staff Sessions (SHA-256 tokens)
 INSERT OR IGNORE INTO sessions (id, user_id, token_hash, expires_at)

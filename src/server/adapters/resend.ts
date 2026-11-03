@@ -1,6 +1,5 @@
 /**
- * Resend Email Dispatch Adapter for BIAI Corporate Pipeline
- * Dispatches enterprise followup emails with template formatting and audit confirmation.
+ * Resend Email Dispatch Adapter for BIAI Corporate Pipeline.
  */
 
 export interface ResendSendOptions {
@@ -10,6 +9,8 @@ export interface ResendSendOptions {
   bodyText: string;
   apiKey?: string;
   fromEmail?: string;
+  idempotencyKey?: string;
+  allowMock?: boolean;
 }
 
 export interface ResendSendResult {
@@ -22,26 +23,30 @@ export interface ResendSendResult {
 }
 
 export async function sendCorporateEmail(options: ResendSendOptions): Promise<ResendSendResult> {
-  const { recipientEmail, recipientName, subject, bodyText, apiKey, fromEmail = 'sales@biai.com.bd' } = options;
+  const { recipientEmail, recipientName, subject, bodyText, apiKey, fromEmail = 'sales@biai.com.bd', idempotencyKey, allowMock = false } = options;
   const timestamp = new Date().toISOString();
 
   if (apiKey) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
     try {
       const response = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
         },
         body: JSON.stringify({
           from: `BIAI Enterprise Solutions <${fromEmail}>`,
           to: [`${recipientName} <${recipientEmail}>`],
           subject,
           text: bodyText
-        })
+        }),
+        signal: controller.signal
       });
 
-      const data: any = await response.json();
+      const data: any = await response.json().catch(() => ({}));
       if (!response.ok) {
         return {
           success: false,
@@ -55,7 +60,7 @@ export async function sendCorporateEmail(options: ResendSendOptions): Promise<Re
 
       return {
         success: true,
-        messageId: data.id || `msg_resend_${Date.now()}`,
+        messageId: data.id || '',
         provider: 'RESEND',
         status: 'SENT',
         timestamp
@@ -66,19 +71,30 @@ export async function sendCorporateEmail(options: ResendSendOptions): Promise<Re
         messageId: '',
         provider: 'RESEND',
         status: 'FAILED',
-        error: err?.message || 'Network error reaching Resend API',
+        error: err?.name === 'AbortError' ? 'PROVIDER_TIMEOUT' : (err?.message || 'Network error reaching Resend API'),
         timestamp
       };
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
-  // Fallback Mock Adapter for Testing and Demonstrations
-  const mockId = `msg_resend_${Math.random().toString(36).substring(2, 10)}`;
+  if (allowMock) {
+    return {
+      success: true,
+      messageId: `mock_email_${crypto.randomUUID()}`,
+      provider: 'MOCK_ADAPTER',
+      status: 'SENT',
+      timestamp
+    };
+  }
+
   return {
-    success: true,
-    messageId: mockId,
-    provider: 'MOCK_ADAPTER',
-    status: 'SENT',
+    success: false,
+    messageId: '',
+    provider: 'RESEND',
+    status: 'FAILED',
+    error: 'MISSING_CREDENTIALS: Resend API key not configured',
     timestamp
   };
 }

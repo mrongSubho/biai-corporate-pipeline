@@ -55,7 +55,7 @@ export interface CorporateLead {
   notes: string;
   is_archived: boolean;
   merged_into_id?: string | null;
-  assigned_to?: string;
+  assigned_to?: string | null;
   anomaly_count?: number;
   anomalies?: AnomalyFinding[];
 }

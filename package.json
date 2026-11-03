@@ -11,6 +11,7 @@
     "build": "vite build",
     "test": "vitest run",
     "test:watch": "vitest",
+    "bootstrap:owner": "node --experimental-strip-types scripts/bootstrap-owner.ts",
     "d1:migrate:local": "wrangler d1 migrations apply biai-pipeline-db --local",
     "d1:migrate:remote": "wrangler d1 migrations apply biai-pipeline-db --remote",
     "deploy": "vite build && wrangler deploy"

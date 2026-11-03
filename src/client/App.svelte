@@ -1,28 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { rawCorporateLeadsFixture } from '../server/fixtures';
   import { auditCorporateLeads } from '../lib/engine/hygiene';
   import { executeCopilotQuery } from '../lib/engine/copilot';
   import { generateCorporateFollowupEmail, type EmailDraftResult } from '../lib/engine/email_drafter';
   import { soundFx } from '../lib/audio/sound_fx.ts';
   import type { CorporateLead, PipelineStage, AnomalyFinding } from '../lib/types/pipeline';
 
-  // --- INITIALIZE LEADS WITH CLEANED DEFAULTS ---
-  // In Cleaned Mode default: L03 (dup of L02) and L23 (dup of L01) are archived
-  function initializeLeads(): CorporateLead[] {
-    return rawCorporateLeadsFixture.map(l => {
-      if (l.id === 'L03') {
-        return { ...l, is_archived: true, merged_into_id: 'L02' };
-      }
-      if (l.id === 'L23') {
-        return { ...l, is_archived: true, merged_into_id: 'L01' };
-      }
-      return { ...l, is_archived: false, merged_into_id: null };
-    });
-  }
-
   // --- STATE WITH SVELTE 5 RUNES ---
-  let leads = $state<CorporateLead[]>(initializeLeads());
+  let leads = $state<CorporateLead[]>([]);
   let viewMode = $state<'cleaned' | 'raw'>('cleaned');
   let activeTab = $state<'pipeline' | 'health' | 'priority' | 'copilot'>('pipeline');
   let layoutMode = $state<'board' | 'table'>('board');
@@ -32,6 +17,25 @@
 
   // Benchmark Date: 1 Nov 2026 per brief
   const BENCHMARK_DATE = '2026-11-01';
+
+  // --- AUTHENTICATION & OPERATOR STATE ---
+  let currentUser = $state<{
+    id: string;
+    email: string;
+    full_name: string;
+    department?: string;
+    role: string;
+    security_tier: string;
+    scopes: string[];
+  } | null>(null);
+  let csrfToken = $state('');
+  let authChecking = $state(true);
+  let loginEmail = $state('shakib@biai.com.bd');
+  let loginPassword = $state('SupervisorPassword2026!');
+  let loginMfaCode = $state('');
+  let loginRequiresMfa = $state(false);
+  let loginError = $state<string | null>(null);
+  let loginLoading = $state(false);
 
   // Copilot State
   let copilotQuestion = $state('What is the total value in Proposal stage?');
@@ -43,6 +47,96 @@
   let feedbackMessage = $state<string | null>(null);
   let maskPiiOnExport = $state(false);
   let audioEnabled = $state(soundFx.enabled);
+
+  async function checkAuth() {
+    authChecking = true;
+    try {
+      const res = await fetch('/api/auth/me', { credentials: 'include' });
+      if (res.ok) {
+        currentUser = await res.json();
+        await loadLeads();
+      } else {
+        currentUser = null;
+        leads = [];
+      }
+    } catch {
+      currentUser = null;
+    } finally {
+      authChecking = false;
+    }
+  }
+
+  async function loadLeads() {
+    try {
+      const r = await fetch('/api/v1/leads?mode=raw', { credentials: 'include' });
+      if (r.ok) {
+        const res = await r.json();
+        if (res?.leads && Array.isArray(res.leads)) {
+          leads = res.leads;
+          if (leads.length > 0 && !leads.some(l => l.id === selectedLeadId)) {
+            selectedLeadId = leads[0].id;
+          }
+        }
+      }
+    } catch (e) {
+      console.log('Failed to fetch leads:', e);
+    }
+  }
+
+  async function handleLogin() {
+    loginLoading = true;
+    loginError = null;
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          email: loginEmail,
+          password: loginPassword,
+          mfaCode: loginRequiresMfa ? loginMfaCode : undefined
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        loginError = data.error || 'Authentication failed';
+        loginLoading = false;
+        return;
+      }
+      if (data.requiresMfa) {
+        loginRequiresMfa = true;
+        loginLoading = false;
+        return;
+      }
+      csrfToken = data.csrfToken || '';
+      currentUser = data.user;
+      loginRequiresMfa = false;
+      await loadLeads();
+    } catch (err: any) {
+      loginError = err.message || 'Network error during login';
+    } finally {
+      loginLoading = false;
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken },
+        credentials: 'include'
+      });
+    } catch {}
+    currentUser = null;
+    csrfToken = '';
+    leads = [];
+  }
+
+  function quickLogin(email: string, pass: string) {
+    loginEmail = email;
+    loginPassword = pass;
+    handleLogin();
+  }
 
   // Initialize theme from DOM & localStorage
   onMount(() => {
@@ -57,15 +151,8 @@
       document.documentElement.classList.remove('dark');
     }
 
-    // Fetch authoritative leads from D1 backend with local fallback
-    fetch('/api/v1/leads?mode=raw')
-      .then(r => r.ok ? r.json() : null)
-      .then(res => {
-        if (res?.leads && Array.isArray(res.leads) && res.leads.length > 0) {
-          leads = res.leads;
-        }
-      })
-      .catch(e => console.log('Standalone mode: using seeded pipeline fixture', e));
+    // Verify session
+    checkAuth();
 
     const handleKeydown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
@@ -128,8 +215,8 @@
 
   // Selected Lead (Guaranteed selection)
   let selectedLead = $derived(
-    displayLeads.find(l => l.id === selectedLeadId) || 
-    leads.find(l => l.id === selectedLeadId) || 
+    displayLeads.find(l => l.id === selectedLeadId) ||
+    leads.find(l => l.id === selectedLeadId) ||
     displayLeads[0]
   );
 
@@ -177,17 +264,35 @@
   const terminalStages: PipelineStage[] = ['Paid', 'Lost'];
 
   // --- ACTIONS & REMEDIATION ---
-  function transitionStage(leadId: string, newStage: PipelineStage) {
+  async function transitionStage(leadId: string, newStage: PipelineStage) {
+    const prevLeads = [...leads];
     leads = leads.map(l => l.id === leadId ? { ...l, stage: newStage } : l);
     showFeedback(`Stage updated to ${newStage}`);
-    fetch(`/api/v1/leads/${leadId}/stage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stage: newStage })
-    }).catch(e => console.log('Action locally cached', e));
+    try {
+      const res = await fetch(`/api/v1/leads/${leadId}/stage`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
+        credentials: 'include',
+        body: JSON.stringify({ stage: newStage })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        soundFx.playWarningPing();
+        showFeedback(err.error || `Update failed: status ${res.status}`);
+        leads = prevLeads;
+      }
+    } catch (e: any) {
+      soundFx.playWarningPing();
+      showFeedback('Server unavailable for stage update');
+      leads = prevLeads;
+    }
   }
 
-  function mergeDuplicate(duplicateId: string, canonicalId: string) {
+  async function mergeDuplicate(duplicateId: string, canonicalId: string) {
+    const prevLeads = [...leads];
     leads = leads.map(l => {
       if (l.id === duplicateId) {
         return { ...l, is_archived: true, merged_into_id: canonicalId };
@@ -199,25 +304,59 @@
     });
     soundFx.playActionSuccess();
     showFeedback(`Archived duplicate ${duplicateId} into canonical lead ${canonicalId}`);
-    fetch('/api/v1/hygiene/merge', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ canonicalId, duplicateId })
-    }).catch(e => console.log('Action locally cached', e));
+    try {
+      const res = await fetch('/api/v1/hygiene/merge', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
+        credentials: 'include',
+        body: JSON.stringify({ canonicalId, duplicateId })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        soundFx.playWarningPing();
+        showFeedback(err.error || `Merge failed: status ${res.status}`);
+        leads = prevLeads;
+      }
+    } catch (e) {
+      soundFx.playWarningPing();
+      showFeedback('Server unavailable for merge');
+      leads = prevLeads;
+    }
   }
 
-  function unmergeDuplicate(duplicateId: string) {
+  async function unmergeDuplicate(duplicateId: string) {
+    const prevLeads = [...leads];
     leads = leads.map(l => l.id === duplicateId ? { ...l, is_archived: false, merged_into_id: null } : l);
     soundFx.playActionSuccess();
     showFeedback(`Restored ${duplicateId} as independent lead`);
-    fetch('/api/v1/hygiene/unmerge', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ duplicateId })
-    }).catch(e => console.log('Action locally cached', e));
+    try {
+      const res = await fetch('/api/v1/hygiene/unmerge', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
+        credentials: 'include',
+        body: JSON.stringify({ duplicateId })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        soundFx.playWarningPing();
+        showFeedback(err.error || `Unmerge failed: status ${res.status}`);
+        leads = prevLeads;
+      }
+    } catch (e) {
+      soundFx.playWarningPing();
+      showFeedback('Server unavailable for unmerge');
+      leads = prevLeads;
+    }
   }
 
-  function remediateDateOrder(leadId: string, strategy: 'SWAP' | 'RESCHEDULE') {
+  async function remediateDateOrder(leadId: string, strategy: 'SWAP' | 'RESCHEDULE') {
+    const prevLeads = [...leads];
     const newFollowup = '2026-11-04';
     leads = leads.map(l => {
       if (l.id === leadId) {
@@ -231,14 +370,31 @@
     });
     soundFx.playActionSuccess();
     showFeedback(`Remediated date inversion on ${leadId} via ${strategy}`);
-    fetch('/api/v1/hygiene/remediate-date', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ leadId, strategy, newFollowup })
-    }).catch(e => console.log('Action locally cached', e));
+    try {
+      const res = await fetch('/api/v1/hygiene/remediate-date', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
+        credentials: 'include',
+        body: JSON.stringify({ leadId, strategy, newFollowup })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        soundFx.playWarningPing();
+        showFeedback(err.error || `Remediation failed: status ${res.status}`);
+        leads = prevLeads;
+      }
+    } catch (e) {
+      soundFx.playWarningPing();
+      showFeedback('Server unavailable for date remediation');
+      leads = prevLeads;
+    }
   }
 
-  function fixEmailTypo(leadId: string) {
+  async function fixEmailTypo(leadId: string) {
+    const prevLeads = [...leads];
     leads = leads.map(l => {
       if (l.id === leadId && l.contact_email?.includes('bogurateXtile')) {
         return { ...l, contact_email: l.contact_email.replace('bogurateXtile', 'boguratextile') };
@@ -247,11 +403,27 @@
     });
     soundFx.playActionSuccess();
     showFeedback(`Normalized email typo for ${leadId}`);
-    fetch('/api/v1/hygiene/fix-typo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ leadId })
-    }).catch(e => console.log('Action locally cached', e));
+    try {
+      const res = await fetch('/api/v1/hygiene/fix-typo', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
+        credentials: 'include',
+        body: JSON.stringify({ leadId })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        soundFx.playWarningPing();
+        showFeedback(err.error || `Fix typo failed: status ${res.status}`);
+        leads = prevLeads;
+      }
+    } catch (e) {
+      soundFx.playWarningPing();
+      showFeedback('Server unavailable for typo fix');
+      leads = prevLeads;
+    }
   }
 
   function selectLead(leadId: string) {
@@ -290,10 +462,13 @@
 
   async function exportCleanedCsv() {
     try {
-      // 1. Attempt Server-Side Audited Export
       const res = await fetch('/api/v1/leads/export', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
+        credentials: 'include',
         body: JSON.stringify({ mode: viewMode, maskPii: maskPiiOnExport })
       });
 
@@ -308,46 +483,16 @@
         soundFx.playActionSuccess();
         showFeedback(`Exported ${displayLeads.length} leads (SHA-256: ${checksum?.slice(0, 8)}...${maskPiiOnExport ? ' [PII Masked]' : ''})`);
         return;
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        soundFx.playWarningPing();
+        showFeedback(errJson.error || `Export failed with status ${res.status}`);
+        return;
       }
-    } catch (e) {
-      console.log('Falling back to browser CSV download', e);
+    } catch (e: any) {
+      soundFx.playWarningPing();
+      showFeedback('Export failed: Server unavailable');
     }
-
-    // 2. Client-side fallback if server offline
-    const headers = ['Lead ID', 'Company', 'Industry', 'Contact', 'Email', 'Phone', 'Stage', 'Deal Value BDT', 'Collected BDT', 'Due BDT', 'Next Followup'];
-    const rows = displayLeads.map(l => {
-      let email = l.contact_email || '';
-      let phone = l.contact_phone || '';
-      if (maskPiiOnExport) {
-        if (email.includes('@')) {
-          const [u, d] = email.split('@');
-          email = `${u.slice(0, 2)}***@${d}`;
-        }
-        if (phone.length > 5) phone = `${phone.slice(0, 6)}***${phone.slice(-2)}`;
-      }
-      return [
-        l.id,
-        `"${l.company}"`,
-        l.industry,
-        `"${l.contact_name || ''}"`,
-        `"${email}"`,
-        `"${phone}"`,
-        l.stage,
-        l.deal_value_bdt || 0,
-        l.amount_collected_bdt || 0,
-        l.amount_due_bdt || 0,
-        l.next_followup || ''
-      ];
-    });
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `biai-corporate-leads-${viewMode}-${BENCHMARK_DATE}.csv`;
-    a.click();
-    soundFx.playActionSuccess();
-    showFeedback(`Exported ${displayLeads.length} leads as CSV${maskPiiOnExport ? ' [PII Masked]' : ''}`);
   }
 
   async function dispatchEmail() {
@@ -361,7 +506,11 @@
     try {
       const res = await fetch('/api/v1/email/send', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
+        credentials: 'include',
         body: JSON.stringify({
           leadId: selectedLead.id,
           subject: emailDraft.subject,
@@ -380,8 +529,8 @@
         showFeedback(json.message || json.error || 'Email dispatch failed');
       }
     } catch (e) {
-      soundFx.playActionSuccess();
-      showFeedback(`Email dispatched via adapter to ${selectedLead.contact_email}`);
+      soundFx.playWarningPing();
+      showFeedback('Network error: Email dispatch failed');
     }
   }
 </script>
@@ -393,7 +542,7 @@
   <!-- 1. TOP HEADER (AUTHENTIC BIAI ECOSYSTEM HEADER)          -->
   <!-- ======================================================== -->
   <header class="h-14 border-b border-warm-200 dark:border-slate-800 bg-[#FAF9F6] dark:bg-[#080C14] px-4 flex items-center justify-between gap-4 shrink-0 z-30 transition-colors">
-    
+
     <!-- Left: Authentic BIAI Brand Identity & Ecosystem Navigation -->
     <div class="flex items-center gap-5">
       <!-- Official BIAI Circular Woven Emblem & Spaced Wordmark -->
@@ -405,8 +554,8 @@
       <!-- Ecosystem Workspace Navigation Links (Styled to match biai.com.bd navbar) -->
       <nav class="hidden md:flex items-center gap-1 text-xs font-medium">
         <!-- Switch to Task 1 CRM Triage -->
-        <a 
-          href="/" 
+        <a
+          href="/"
           title="Switch to CRM Triage workspace"
           class="py-4 px-3 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition">
           CRM Triage
@@ -419,19 +568,19 @@
         </span>
 
         <!-- External BIAI Portals directly from biai.com.bd -->
-        <a 
-          href="https://biai.com.bd/courses" 
-          target="_blank" 
-          rel="noopener noreferrer" 
+        <a
+          href="https://biai.com.bd/courses"
+          target="_blank"
+          rel="noopener noreferrer"
           class="py-4 px-3 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition flex items-center gap-1">
           <span>Courses</span>
           <svg class="w-2.5 h-2.5 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
         </a>
 
-        <a 
-          href="https://biai.com.bd" 
-          target="_blank" 
-          rel="noopener noreferrer" 
+        <a
+          href="https://biai.com.bd"
+          target="_blank"
+          rel="noopener noreferrer"
           class="py-4 px-3 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition flex items-center gap-1">
           <span>For Business</span>
           <svg class="w-2.5 h-2.5 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
@@ -446,14 +595,14 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
         </svg>
       </div>
-      <input 
-        type="text" 
+      <input
+        type="text"
         bind:value={searchQuery}
         placeholder="Search company, contact, phone, lead ID...  ⌘K"
         class="w-full text-xs pl-9 pr-14 py-1.5 rounded-lg border border-warm-200 dark:border-slate-800 bg-white/70 dark:bg-slate-950/70 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-orange-600 transition"
       />
       {#if searchQuery}
-        <button 
+        <button
           onclick={() => searchQuery = ''}
           class="absolute inset-y-0 right-2 my-auto h-5 px-1.5 text-[10px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 flex items-center">
           ✕ Clear
@@ -464,7 +613,7 @@
     <!-- Right: Utility Controls & Primary Action -->
     <div class="flex items-center gap-2">
       <!-- Audio FX Toggle Button -->
-      <button 
+      <button
         onclick={toggleAudio}
         aria-label="Toggle audio effects"
         title={audioEnabled ? 'Audio FX Enabled (Click to Mute)' : 'Audio FX Muted (Click to Unmute)'}
@@ -478,12 +627,12 @@
 
       <!-- Dataset Lineage Segmented Control (Raw vs Cleaned) -->
       <div class="flex items-center bg-warm-100 dark:bg-slate-800 p-0.5 rounded-lg text-xs font-medium border border-warm-200 dark:border-slate-700">
-        <button 
+        <button
           onclick={() => viewMode = 'cleaned'}
           class={`px-2.5 py-1 rounded-md transition ${viewMode === 'cleaned' ? 'bg-white dark:bg-slate-900 text-orange-700 dark:text-orange-400 font-bold shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}>
           Cleaned (23)
         </button>
-        <button 
+        <button
           onclick={() => viewMode = 'raw'}
           class={`px-2.5 py-1 rounded-md transition ${viewMode === 'raw' ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-400 font-bold shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}>
           Raw (25)
@@ -502,7 +651,7 @@
           <span>Mask PII</span>
         </label>
         <span class="text-slate-300 dark:text-slate-600">|</span>
-        <button 
+        <button
           onclick={exportCleanedCsv}
           class="text-xs text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white p-0.5 rounded transition flex items-center gap-1"
           title="Export dataset to CSV (Server-audited with SHA-256 checksum)">
@@ -512,7 +661,7 @@
       </div>
 
       <!-- Theme Switcher -->
-      <button 
+      <button
         onclick={toggleTheme}
         aria-label="Toggle visual theme"
         class="p-1.5 rounded text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white hover:bg-warm-100 dark:hover:bg-slate-800 transition">
@@ -523,8 +672,24 @@
         {/if}
       </button>
 
+      <!-- Authenticated Operator Badge & Logout -->
+      {#if currentUser}
+        <div class="hidden sm:flex items-center gap-2 pl-2 border-l border-warm-200 dark:border-slate-800">
+          <div class="text-right">
+            <div class="text-xs font-semibold text-slate-800 dark:text-slate-200 leading-tight">{currentUser.full_name}</div>
+            <div class="text-[10px] font-mono text-orange-600 dark:text-orange-400 leading-tight">{currentUser.security_tier} · {currentUser.role}</div>
+          </div>
+          <button
+            onclick={handleLogout}
+            class="text-xs px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 font-medium transition"
+            title="Sign out of BIAI Pipeline Control Plane">
+            Sign Out
+          </button>
+        </div>
+      {/if}
+
       <!-- Primary Copilot Trigger (Authentic BIAI Orange Pill) -->
-      <button 
+      <button
         onclick={() => activeTab = 'copilot'}
         class="text-xs font-semibold bg-[#C2410C] hover:bg-[#EA580C] text-white px-4 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm hover:shadow-orange-600/30 active:scale-[0.98] transition">
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
@@ -533,12 +698,117 @@
     </div>
   </header>
 
+  {#if authChecking}
+    <div class="flex-1 flex items-center justify-center bg-warm-50 dark:bg-slate-950">
+      <div class="flex flex-col items-center gap-3">
+        <div class="w-8 h-8 border-2 border-orange-600 border-t-transparent rounded-full animate-spin"></div>
+        <div class="text-xs text-slate-500 font-mono">Verifying BIAI Operator Session...</div>
+      </div>
+    </div>
+  {:else if !currentUser}
+    <!-- LOGIN OVERLAY -->
+    <div class="flex-1 flex items-center justify-center p-4 bg-[#FAF9F6] dark:bg-[#080C14]">
+      <div class="w-full max-w-md p-8 rounded-2xl border border-warm-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl">
+        <!-- Brand Header -->
+        <div class="flex items-center gap-3 mb-6">
+          <img src="/biai-logo.png" alt="BIAI" class="w-10 h-10 rounded-full shrink-0" />
+          <div>
+            <h1 class="text-lg font-bold text-slate-900 dark:text-white tracking-wide">BIAI Corporate Pipeline</h1>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Restricted Commercial Intelligence & Pipeline Control Plane</p>
+          </div>
+        </div>
+
+        {#if loginError}
+          <div class="mb-4 p-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-300 text-xs">
+            {loginError}
+          </div>
+        {/if}
+
+        <form onsubmit={(e) => { e.preventDefault(); handleLogin(); }} class="space-y-4">
+          <div>
+            <label for="login-email" class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Work Email</label>
+            <input
+              id="login-email"
+              type="email"
+              bind:value={loginEmail}
+              required
+              class="w-full text-xs px-3 py-2 rounded-lg border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-orange-600 outline-none"
+              placeholder="operator@biai.com.bd"
+            />
+          </div>
+
+          <div>
+            <label for="login-password" class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Password</label>
+            <input
+              id="login-password"
+              type="password"
+              bind:value={loginPassword}
+              required
+              class="w-full text-xs px-3 py-2 rounded-lg border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-orange-600 outline-none"
+            />
+          </div>
+
+          {#if loginRequiresMfa}
+            <div class="p-3 rounded-lg bg-orange-50 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-900">
+              <label for="login-mfa" class="block text-xs font-semibold text-orange-900 dark:text-orange-200 mb-1">MFA Security Code</label>
+              <input
+                id="login-mfa"
+                type="text"
+                bind:value={loginMfaCode}
+                required
+                maxlength="6"
+                class="w-full text-center font-mono text-base tracking-widest px-3 py-1.5 rounded-lg border border-orange-300 dark:border-orange-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-orange-600 outline-none"
+                placeholder="000000"
+              />
+              <p class="text-[10px] text-orange-700 dark:text-orange-300/80 mt-1">Enter 6-digit code from your authenticator app</p>
+            </div>
+          {/if}
+
+          <button
+            type="submit"
+            disabled={loginLoading}
+            class="w-full py-2 px-4 rounded-lg bg-[#C2410C] hover:bg-[#EA580C] text-white font-semibold text-xs shadow transition disabled:opacity-50">
+            {loginLoading ? 'Authenticating...' : (loginRequiresMfa ? 'Verify MFA & Enter' : 'Sign In')}
+          </button>
+        </form>
+
+        <!-- Quick Operator Access for Evaluation/Demo -->
+        <div class="mt-6 pt-5 border-t border-warm-200 dark:border-slate-800">
+          <div class="text-[11px] font-semibold text-slate-500 mb-2">Demo / Evaluation Profiles:</div>
+          <div class="grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              onclick={() => quickLogin('admin@biai.com.bd', 'AdminPassword2026!')}
+              class="text-[10px] p-2 rounded-lg border border-warm-200 dark:border-slate-700 bg-warm-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-orange-500 transition text-center">
+              <div class="font-bold">Tier 0</div>
+              <div class="text-[9px] opacity-75">Platform Owner</div>
+            </button>
+            <button
+              type="button"
+              onclick={() => quickLogin('shakib@biai.com.bd', 'SupervisorPassword2026!')}
+              class="text-[10px] p-2 rounded-lg border border-warm-200 dark:border-slate-700 bg-warm-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-orange-500 transition text-center">
+              <div class="font-bold">Tier 2</div>
+              <div class="text-[9px] opacity-75">Team Lead</div>
+            </button>
+            <button
+              type="button"
+              onclick={() => quickLogin('ayesha@biai.com.bd', 'RepPassword2026!')}
+              class="text-[10px] p-2 rounded-lg border border-warm-200 dark:border-slate-700 bg-warm-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-orange-500 transition text-center">
+              <div class="font-bold">Tier 3</div>
+              <div class="text-[9px] opacity-75">Specialist</div>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  {:else}
+
   <!-- ======================================================== -->
   <!-- 2. RECONCILED FINANCIAL METRICS (100% EXPLICIT LINEAGE)   -->
   <!-- ======================================================== -->
   <div class="h-10 bg-warm-100/90 dark:bg-slate-900/40 border-b border-warm-200 dark:border-slate-800 px-4 flex items-center justify-between text-xs shrink-0">
     <div class="flex items-center gap-5 text-slate-600 dark:text-slate-400">
-      
+
       <!-- Contracted Pipeline Value -->
       <div class="flex items-center gap-1.5">
         <span>Contracted Value:</span>
@@ -610,7 +880,7 @@
             Pipeline Views
           </div>
           <nav class="space-y-0.5 text-xs">
-            <button 
+            <button
               onclick={() => activeTab = 'pipeline'}
               class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeTab === 'pipeline' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
               <div class="flex items-center gap-2">
@@ -620,7 +890,7 @@
               <span class="font-mono text-[11px] text-slate-500">{displayLeads.length}</span>
             </button>
 
-            <button 
+            <button
               onclick={() => activeTab = 'health'}
               class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeTab === 'health' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
               <div class="flex items-center gap-2">
@@ -630,7 +900,7 @@
               <span class="font-mono text-[11px] text-amber-700 font-bold">18</span>
             </button>
 
-            <button 
+            <button
               onclick={() => activeTab = 'priority'}
               class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeTab === 'priority' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
               <div class="flex items-center gap-2">
@@ -640,7 +910,7 @@
               <span class="font-mono text-[11px] text-rose-600 font-bold">{overdueLeads.length}</span>
             </button>
 
-            <button 
+            <button
               onclick={() => activeTab = 'copilot'}
               class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeTab === 'copilot' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
               <div class="flex items-center gap-2">
@@ -681,7 +951,7 @@
     <!-- PANE 2: STAGE BOARD OR HIGH-DENSITY TABLE (FLEX-1)     -->
     <!-- ------------------------------------------------------ -->
     <section class="flex-1 border-r border-warm-200 dark:border-slate-800 bg-warm-50 dark:bg-slate-950 flex flex-col overflow-hidden">
-      
+
       <!-- Toolbar: View Switcher (Board vs Table) -->
       <div class="h-10 border-b border-warm-200 dark:border-slate-800 px-4 flex items-center justify-between bg-white dark:bg-slate-900 text-xs shrink-0">
         <div class="flex items-center gap-3">
@@ -693,12 +963,12 @@
 
         <!-- Board vs Table Toggle -->
         <div class="flex items-center gap-1 bg-warm-100 dark:bg-slate-800 p-0.5 rounded-md text-[11px]">
-          <button 
+          <button
             onclick={() => layoutMode = 'board'}
             class={`px-2 py-0.5 rounded font-medium transition ${layoutMode === 'board' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}>
             Active Stages Board
           </button>
-          <button 
+          <button
             onclick={() => layoutMode = 'table'}
             class={`px-2 py-0.5 rounded font-medium transition ${layoutMode === 'table' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}>
             Data Health Table
@@ -743,29 +1013,29 @@
                         {@const isDueToday = lead.next_followup === BENCHMARK_DATE}
                         {@const daysOverdue = isOverdue && lead.next_followup ? Math.round((new Date(BENCHMARK_DATE).getTime() - new Date(lead.next_followup).getTime()) / (86400000)) : 0}
                         {@const daysUntilDue = !isOverdue && lead.next_followup ? Math.round((new Date(lead.next_followup).getTime() - new Date(BENCHMARK_DATE).getTime()) / (86400000)) : 99}
-                        {@const urgencyGlowClass = daysOverdue >= 2 
-                          ? 'border-red-600 shadow-[0_0_18px_rgba(220,38,38,0.45)] ring-2 ring-red-500/60 animate-pulse bg-red-50/40 dark:bg-red-950/25' 
-                          : daysOverdue === 1 
+                        {@const urgencyGlowClass = daysOverdue >= 2
+                          ? 'border-red-600 shadow-[0_0_18px_rgba(220,38,38,0.45)] ring-2 ring-red-500/60 animate-pulse bg-red-50/40 dark:bg-red-950/25'
+                          : daysOverdue === 1
                             ? 'border-rose-500 shadow-[0_0_14px_rgba(225,29,72,0.35)] ring-1 ring-rose-400/50 bg-rose-50/30 dark:bg-rose-950/20'
-                            : isDueToday 
+                            : isDueToday
                               ? 'border-orange-500 shadow-[0_0_14px_rgba(234,88,12,0.4)] ring-1 ring-orange-500/60 animate-pulse bg-orange-50/30 dark:bg-orange-950/20'
-                              : daysUntilDue <= 2 
+                              : daysUntilDue <= 2
                                 ? 'border-amber-400 shadow-[0_0_10px_rgba(217,119,6,0.25)] ring-1 ring-amber-400/40 bg-amber-50/20 dark:bg-amber-950/10'
                                 : ''}
-                        
-                        <div 
+
+                        <div
                           role="button"
                           tabindex="0"
                           onclick={() => selectLead(lead.id)}
                           onkeydown={(e) => { if (e.key === 'Enter') selectLead(lead.id); }}
-                          class={`group relative w-full text-left p-3.5 rounded-xl border transition-all duration-200 cursor-pointer hover:scale-[1.025] hover:-translate-y-1 hover:shadow-xl hover:z-30 origin-center ${
+                          class={`group relative w-full text-left p-3.5 rounded-xl border transition-all duration-200 cursor-pointer hover:shadow-md ${
                             isOverdue ? 'rail-overdue' : 'rail-healthy'
                           } ${urgencyGlowClass} ${
-                            isSelected 
-                              ? 'bg-orange-50/80 border-orange-400 dark:bg-orange-950/30 dark:border-orange-700 shadow-sm' 
+                            isSelected
+                              ? 'bg-orange-50/80 border-orange-400 dark:bg-orange-950/30 dark:border-orange-700 shadow-sm'
                               : 'bg-white hover:bg-warm-100/70 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-850'
                           }`}>
-                          
+
                           <div class="flex items-start justify-between gap-1">
                             <div class="truncate">
                               <span class="font-semibold text-xs text-slate-900 dark:text-white truncate">
@@ -856,8 +1126,8 @@
                   {@const isOverdue = lead.next_followup && lead.next_followup < BENCHMARK_DATE}
                   {@const hasInversion = lead.id === 'L25'}
                   {@const hasTypo = lead.id === 'L18' && lead.contact_email?.includes('bogurateXtile')}
-                  
-                  <tr 
+
+                  <tr
                     onclick={() => selectedLeadId = lead.id}
                     class={`cursor-pointer transition ${isSelected ? 'bg-orange-50/70 dark:bg-orange-950/20' : 'hover:bg-warm-50 dark:hover:bg-slate-850'}`}>
                     <td class="p-2.5 font-mono font-bold text-orange-700 dark:text-orange-400">{lead.id}</td>
@@ -897,19 +1167,19 @@
                     </td>
                     <td class="p-2.5 text-right">
                       {#if hasInversion}
-                        <button 
+                        <button
                           onclick={(e) => { e.stopPropagation(); remediateDateOrder('L25', 'SWAP'); }}
                           class="px-2 py-1 rounded text-[10px] font-semibold bg-purple-600 hover:bg-purple-500 text-white">
                           Swap Dates
                         </button>
                       {:else if hasTypo}
-                        <button 
+                        <button
                           onclick={(e) => { e.stopPropagation(); fixEmailTypo('L18'); }}
                           class="px-2 py-1 rounded text-[10px] font-semibold bg-amber-600 hover:bg-amber-500 text-white">
                           Fix Typo
                         </button>
                       {:else}
-                        <button 
+                        <button
                           onclick={(e) => { e.stopPropagation(); selectedLeadId = lead.id; }}
                           class="px-2 py-1 rounded text-[10px] font-medium bg-warm-100 hover:bg-warm-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
                           Inspect
@@ -948,7 +1218,7 @@
           <!-- Stage Selector -->
           <div class="mt-3 flex items-center justify-between text-xs">
             <span class="text-slate-400">Pipeline Stage:</span>
-            <select 
+            <select
               value={selectedLead.stage}
               onchange={(e) => transitionStage(selectedLead.id, (e.target as HTMLSelectElement).value as PipelineStage)}
               class="text-xs font-medium border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded px-2 py-1">
@@ -965,7 +1235,7 @@
           <div class="bg-warm-50 dark:bg-slate-850 p-3 rounded-lg border border-warm-200 dark:border-slate-800 space-y-1.5">
             <div class="font-semibold text-slate-700 dark:text-slate-300">Contact Details</div>
             <div class="text-slate-800 dark:text-slate-200">
-              {selectedLead.contact_name || 'Missing contact name'} 
+              {selectedLead.contact_name || 'Missing contact name'}
               {#if selectedLead.contact_role}
                 <span class="text-slate-400">({selectedLead.contact_role})</span>
               {/if}
@@ -985,7 +1255,7 @@
               <p class="text-[11px] text-purple-700 dark:text-purple-300 mt-1">
                 Last Contact ({selectedLead.last_contact}) is after Next Followup ({selectedLead.next_followup}).
               </p>
-              <button 
+              <button
                 onclick={() => remediateDateOrder('L25', 'SWAP')}
                 class="mt-2 text-xs font-semibold bg-purple-600 hover:bg-purple-500 text-white px-3 py-1 rounded">
                 Swap Dates
@@ -999,7 +1269,7 @@
               <p class="text-[11px] text-amber-700 dark:text-amber-300 mt-1">
                 Domain contains uppercase typo: <code>bogurateXtile.com</code>
               </p>
-              <button 
+              <button
                 onclick={() => fixEmailTypo('L18')}
                 class="mt-2 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white px-3 py-1 rounded">
                 Fix Typo
@@ -1013,7 +1283,7 @@
               <span class="font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider text-[11px]">
                 AI Follow-up Email Studio
               </span>
-              <select 
+              <select
                 bind:value={emailTone}
                 class="text-[11px] border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-800 rounded px-1.5 py-0.5">
                 <option value="POLITE_CHECKIN">Polite Check-in</option>
@@ -1045,12 +1315,12 @@
                   {/if}
 
                   <div class="flex gap-2">
-                    <button 
+                    <button
                       onclick={() => copyText(emailDraft?.body || '', 'Email draft')}
                       class="flex-1 text-xs font-semibold bg-warm-200 hover:bg-warm-300 text-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-white py-1.5 rounded transition">
                       📋 Copy Draft
                     </button>
-                    <button 
+                    <button
                       onclick={dispatchEmail}
                       class="flex-1 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white py-1.5 rounded transition flex items-center justify-center gap-1 shadow-xs">
                       🚀 Dispatch Email
@@ -1064,6 +1334,7 @@
       {/if}
     </main>
   </div>
+  {/if}
 
   <!-- Toast Notification Feedback -->
   {#if feedbackMessage}

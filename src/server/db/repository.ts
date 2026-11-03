@@ -2,9 +2,8 @@ import { rawCorporateLeadsFixture } from '../fixtures.ts';
 import type { CorporateLead, PipelineStage } from '../../lib/types/pipeline.ts';
 import type { AuthenticatedCorporateUser } from '../auth.ts';
 
-// In-Memory Fallback Store (when D1 is not bound)
+// In-Memory Fallback Store (non-production only)
 let inMemoryLeads: CorporateLead[] = JSON.parse(JSON.stringify(rawCorporateLeadsFixture));
-// Mark duplicates in cleaned mode initially
 inMemoryLeads.forEach(l => {
   if (l.id === 'L03') {
     l.is_archived = true;
@@ -18,7 +17,6 @@ inMemoryLeads.forEach(l => {
 let inMemoryAudits: any[] = [];
 let inMemoryMergeDecisions: Map<string, { beforeSnapshot: any; duplicateId: string; canonicalId: string }> = new Map();
 
-// Save initial snapshot for pre-seeded duplicates
 const l02Original = inMemoryLeads.find(l => l.id === 'L02');
 if (l02Original) {
   inMemoryMergeDecisions.set('L03', {
@@ -36,6 +34,26 @@ if (l01Original) {
   });
 }
 
+function isWorkspaceWideActor(actor: AuthenticatedCorporateUser): boolean {
+  return actor.security_tier <= 'TIER_2' ||
+    actor.role === 'PLATFORM_OWNER' ||
+    actor.role === 'OPERATIONS_ADMIN' ||
+    actor.role === 'TEAM_LEAD' ||
+    actor.role === 'ADMIN' ||
+    actor.role === 'SALES_MANAGER';
+}
+
+function appendLeadScope(
+  query: string,
+  params: any[],
+  actor?: AuthenticatedCorporateUser
+): string {
+  if (!actor) return query;
+  if (isWorkspaceWideActor(actor)) return query;
+  params.push(actor.id);
+  return `${query} AND assigned_user_id = ?`;
+}
+
 export interface PipelineSummaryMetrics {
   mode: 'cleaned' | 'raw';
   total_leads: number;
@@ -48,18 +66,22 @@ export interface PipelineSummaryMetrics {
 
 export class PipelineRepository {
   /**
-   * Fetch leads with authoritative financial reconciliation
+   * Fetch leads with authoritative financial reconciliation and workspace scoping
    */
   static async getLeads(
     db: any,
     mode: 'cleaned' | 'raw' = 'cleaned',
     stage?: string,
-    industry?: string
+    industry?: string,
+    actor?: AuthenticatedCorporateUser,
+    isProduction = false
   ): Promise<PipelineSummaryMetrics> {
+    const workspaceId = actor?.workspace_id || 'ws_biai_b2b';
+
     if (db) {
       try {
         let query = `
-          SELECT 
+          SELECT
             lead_id_display as id,
             company,
             industry,
@@ -76,15 +98,15 @@ export class PipelineRepository {
             next_followup_date as next_followup,
             notes,
             is_archived,
-            merged_into_id
+            merged_into_id,
+            assigned_user_id as assigned_to
           FROM canonical_leads
-          WHERE 1=1
+          WHERE workspace_id = ?
         `;
-        const params: any[] = [];
+        const params: any[] = [workspaceId];
 
-        if (mode === 'cleaned') {
-          query += ' AND is_archived = 0';
-        }
+        if (mode === 'cleaned') query += ' AND is_archived = 0';
+        query = appendLeadScope(query, params, actor);
         if (stage) {
           query += ' AND stage = ?';
           params.push(stage);
@@ -113,7 +135,6 @@ export class PipelineRepository {
           .reduce((sum, l) => sum + (l.amount_collected_bdt || 0), 0);
 
         // 3. Outstanding Receivables: Sum amount_due_bdt ONLY for 'Invoice sent' and 'Paid' (partial payments)
-        // Strictly prevents uncontracted proposals from inflating receivables to 4M+!
         const outstandingDue = leads
           .filter(l => l.stage === 'Invoice sent' || l.stage === 'Paid')
           .reduce((sum, l) => sum + (l.amount_due_bdt || 0), 0);
@@ -132,15 +153,31 @@ export class PipelineRepository {
           active_weighted_pipeline_bdt: activeWeighted,
           leads
         };
-      } catch (err) {
-        console.error('D1 getLeads error, falling back to in-memory:', err);
+      } catch (err: any) {
+        console.error('D1 getLeads error:', err);
+        if (isProduction) {
+          const e: any = new Error(err.message || 'Database service unavailable');
+          e.status = 503;
+          e.code = 'DB_UNAVAILABLE';
+          throw e;
+        }
       }
     }
 
-    // In-memory fallback
+    if (isProduction) {
+      const e: any = new Error('Database service unavailable: D1 binding missing');
+      e.status = 503;
+      e.code = 'DB_UNAVAILABLE';
+      throw e;
+    }
+
+    // In-memory fallback for non-production
     let results = [...inMemoryLeads];
     if (mode === 'cleaned') {
       results = results.filter(l => !l.is_archived);
+    }
+    if (actor && !isWorkspaceWideActor(actor)) {
+      results = results.filter(l => l.assigned_to === actor.id);
     }
     if (stage) {
       results = results.filter(l => l.stage === stage);
@@ -156,7 +193,6 @@ export class PipelineRepository {
     const cashCollected = results
       .reduce((sum, l) => sum + (l.amount_collected_bdt || 0), 0);
 
-    // Sum amount_due_bdt ONLY for 'Invoice sent' and 'Paid'
     const outstandingDue = results
       .filter(l => l.stage === 'Invoice sent' || l.stage === 'Paid')
       .reduce((sum, l) => sum + (l.amount_due_bdt || 0), 0);
@@ -183,15 +219,21 @@ export class PipelineRepository {
     db: any,
     canonicalId: string,
     duplicateId: string,
-    actor: AuthenticatedCorporateUser
+    actor: AuthenticatedCorporateUser,
+    isProduction = false
   ) {
     if (db) {
       try {
-        const canLead = await db.prepare('SELECT * FROM canonical_leads WHERE lead_id_display = ? OR id = ?').bind(canonicalId, canonicalId).first();
-        const dupLead = await db.prepare('SELECT * FROM canonical_leads WHERE lead_id_display = ? OR id = ?').bind(duplicateId, duplicateId).first();
+        const scope = isWorkspaceWideActor(actor) ? '' : ' AND assigned_user_id = ?';
+        const scopeParams = isWorkspaceWideActor(actor) ? [] : [actor.id];
+        const canLead = await db.prepare(`SELECT * FROM canonical_leads WHERE (lead_id_display = ? OR id = ?) AND workspace_id = ?${scope}`).bind(canonicalId, canonicalId, actor.workspace_id, ...scopeParams).first();
+        const dupLead = await db.prepare(`SELECT * FROM canonical_leads WHERE (lead_id_display = ? OR id = ?) AND workspace_id = ?${scope}`).bind(duplicateId, duplicateId, actor.workspace_id, ...scopeParams).first();
 
         if (!canLead || !dupLead) {
-          throw new Error(`Lead not found: canonical=${canonicalId}, duplicate=${duplicateId}`);
+          const error: any = new Error(`Lead not found: canonical=${canonicalId}, duplicate=${duplicateId}`);
+          error.status = 404;
+          error.code = 'LEAD_NOT_FOUND';
+          throw error;
         }
 
         const snapshot = JSON.stringify({ notes: canLead.notes });
@@ -202,13 +244,13 @@ export class PipelineRepository {
           db.prepare(`
             UPDATE canonical_leads
             SET is_archived = 1, merged_into_id = ?, updated_at = datetime('now')
-            WHERE id = ?
-          `).bind(canLead.id, dupLead.id),
+            WHERE id = ? AND workspace_id = ?
+          `).bind(canLead.id, dupLead.id, actor.workspace_id),
           db.prepare(`
             UPDATE canonical_leads
             SET notes = ?, updated_at = datetime('now')
-            WHERE id = ?
-          `).bind(mergedNote, canLead.id),
+            WHERE id = ? AND workspace_id = ?
+          `).bind(mergedNote, canLead.id, actor.workspace_id),
           db.prepare(`
             INSERT INTO merge_decisions (id, workspace_id, canonical_lead_id, duplicate_lead_id, match_confidence, survivorship_policy_json, before_state_snapshot_json, merged_by)
             VALUES (?, ?, ?, ?, 1.0, '{"note_strategy":"APPEND"}', ?, ?)
@@ -222,7 +264,7 @@ export class PipelineRepository {
             actor.role,
             canLead.lead_id_display,
             snapshot,
-            JSON.stringify({ notes: mergedNote, is_archived: 0 }),
+            JSON.stringify({ notes: mergedNote, is_archived: 1 }),
             JSON.stringify({ duplicate_id: dupLead.lead_id_display, phantom_removed: dupLead.deal_value_bdt })
           )
         ]);
@@ -233,12 +275,25 @@ export class PipelineRepository {
           duplicateId: dupLead.lead_id_display,
           phantomRevenueRemoved: dupLead.deal_value_bdt
         };
-      } catch (err) {
-        console.error('D1 merge error, falling back to in-memory:', err);
+      } catch (err: any) {
+        console.error('D1 merge error:', err);
+        if (err?.status === 404) throw err;
+        if (isProduction) {
+          const e: any = new Error(err.message || 'Database error');
+          e.status = 503;
+          e.code = 'DB_UNAVAILABLE';
+          throw e;
+        }
       }
     }
 
-    // In-memory fallback
+    if (isProduction) {
+      const e: any = new Error('Database service unavailable: D1 binding missing');
+      e.status = 503;
+      e.code = 'DB_UNAVAILABLE';
+      throw e;
+    }
+
     const canonical = inMemoryLeads.find(l => l.id === canonicalId);
     const duplicate = inMemoryLeads.find(l => l.id === duplicateId);
     if (!canonical || !duplicate) {
@@ -285,25 +340,33 @@ export class PipelineRepository {
   static async unmergeLead(
     db: any,
     duplicateId: string,
-    actor: AuthenticatedCorporateUser
+    actor: AuthenticatedCorporateUser,
+    isProduction = false
   ) {
     if (db) {
       try {
-        const dupLead = await db.prepare('SELECT * FROM canonical_leads WHERE lead_id_display = ? OR id = ?').bind(duplicateId, duplicateId).first();
-        if (!dupLead) throw new Error(`Lead ${duplicateId} not found`);
+        const scope = isWorkspaceWideActor(actor) ? '' : ' AND assigned_user_id = ?';
+        const scopeParams = isWorkspaceWideActor(actor) ? [] : [actor.id];
+        const dupLead = await db.prepare(`SELECT * FROM canonical_leads WHERE (lead_id_display = ? OR id = ?) AND workspace_id = ?${scope}`).bind(duplicateId, duplicateId, actor.workspace_id, ...scopeParams).first();
+        if (!dupLead) {
+          const error: any = new Error(`Lead ${duplicateId} not found`);
+          error.status = 404;
+          error.code = 'LEAD_NOT_FOUND';
+          throw error;
+        }
 
         const decision = await db.prepare(`
-          SELECT * FROM merge_decisions 
-          WHERE duplicate_lead_id = ? AND can_revert = 1 
+          SELECT * FROM merge_decisions
+          WHERE duplicate_lead_id = ? AND workspace_id = ? AND can_revert = 1
           ORDER BY created_at DESC LIMIT 1
-        `).bind(dupLead.id).first();
+        `).bind(dupLead.id, actor.workspace_id).first();
 
         const batchStatements = [
           db.prepare(`
             UPDATE canonical_leads
             SET is_archived = 0, merged_into_id = NULL, updated_at = datetime('now')
-            WHERE id = ?
-          `).bind(dupLead.id),
+            WHERE id = ? AND workspace_id = ?
+          `).bind(dupLead.id, actor.workspace_id),
           db.prepare(`
             INSERT INTO audit_events (workspace_id, actor_id, actor_type, actor_role, event_type, entity_id, before_state_json, after_state_json, metadata_json)
             VALUES (?, ?, 'USER', ?, 'DUPLICATE_UNMERGED', ?, ?, ?, ?)
@@ -318,12 +381,11 @@ export class PipelineRepository {
           )
         ];
 
-        // If pre-merge snapshot is available, revert canonical notes to prevent duplicate strings!
         if (decision?.before_state_snapshot_json) {
           const snapshot = JSON.parse(decision.before_state_snapshot_json);
           if (snapshot.notes) {
             batchStatements.push(
-              db.prepare('UPDATE canonical_leads SET notes = ? WHERE id = ?').bind(snapshot.notes, decision.canonical_lead_id)
+              db.prepare('UPDATE canonical_leads SET notes = ? WHERE id = ? AND workspace_id = ?').bind(snapshot.notes, decision.canonical_lead_id, actor.workspace_id)
             );
           }
           batchStatements.push(
@@ -333,12 +395,25 @@ export class PipelineRepository {
 
         await db.batch(batchStatements);
         return { success: true, leadId: dupLead.lead_id_display };
-      } catch (err) {
-        console.error('D1 unmerge error, falling back to in-memory:', err);
+      } catch (err: any) {
+        console.error('D1 unmerge error:', err);
+        if (err?.status === 404) throw err;
+        if (isProduction) {
+          const e: any = new Error(err.message || 'Database error');
+          e.status = 503;
+          e.code = 'DB_UNAVAILABLE';
+          throw e;
+        }
       }
     }
 
-    // In-memory fallback
+    if (isProduction) {
+      const e: any = new Error('Database service unavailable: D1 binding missing');
+      e.status = 503;
+      e.code = 'DB_UNAVAILABLE';
+      throw e;
+    }
+
     const duplicate = inMemoryLeads.find(l => l.id === duplicateId);
     if (!duplicate) throw new Error('Lead not found');
 
@@ -376,7 +451,8 @@ export class PipelineRepository {
     leadId: string,
     strategy: 'SWAP' | 'RESCHEDULE',
     newFollowup: string | undefined,
-    actor: AuthenticatedCorporateUser
+    actor: AuthenticatedCorporateUser,
+    isProduction = false
   ) {
     if (strategy === 'RESCHEDULE' && (!newFollowup || newFollowup.trim() === '')) {
       throw new Error('Explicit future date is required for RESCHEDULE strategy.');
@@ -384,8 +460,15 @@ export class PipelineRepository {
 
     if (db) {
       try {
-        const lead = await db.prepare('SELECT * FROM canonical_leads WHERE lead_id_display = ? OR id = ?').bind(leadId, leadId).first();
-        if (!lead) throw new Error(`Lead ${leadId} not found`);
+        const scope = isWorkspaceWideActor(actor) ? '' : ' AND assigned_user_id = ?';
+        const scopeParams = isWorkspaceWideActor(actor) ? [] : [actor.id];
+        const lead = await db.prepare(`SELECT * FROM canonical_leads WHERE (lead_id_display = ? OR id = ?) AND workspace_id = ?${scope}`).bind(leadId, leadId, actor.workspace_id, ...scopeParams).first();
+        if (!lead) {
+          const error: any = new Error(`Lead ${leadId} not found`);
+          error.status = 404;
+          error.code = 'LEAD_NOT_FOUND';
+          throw error;
+        }
 
         let updatedLastContact = lead.last_contact_date;
         let updatedNextFollowup = lead.next_followup_date;
@@ -401,8 +484,8 @@ export class PipelineRepository {
           db.prepare(`
             UPDATE canonical_leads
             SET last_contact_date = ?, next_followup_date = ?, updated_at = datetime('now')
-            WHERE id = ?
-          `).bind(updatedLastContact, updatedNextFollowup, lead.id),
+            WHERE id = ? AND workspace_id = ?
+          `).bind(updatedLastContact, updatedNextFollowup, lead.id, actor.workspace_id),
           db.prepare(`
             INSERT INTO audit_events (workspace_id, actor_id, actor_type, actor_role, event_type, entity_id, before_state_json, after_state_json, metadata_json)
             VALUES (?, ?, 'USER', ?, 'DATE_ORDER_REMEDIATED', ?, ?, ?, ?)
@@ -423,12 +506,25 @@ export class PipelineRepository {
           last_contact: updatedLastContact,
           next_followup: updatedNextFollowup
         };
-      } catch (err) {
-        console.error('D1 remediateDate error, falling back to in-memory:', err);
+      } catch (err: any) {
+        console.error('D1 remediateDate error:', err);
+        if (err?.status === 404) throw err;
+        if (isProduction) {
+          const e: any = new Error(err.message || 'Database error');
+          e.status = 503;
+          e.code = 'DB_UNAVAILABLE';
+          throw e;
+        }
       }
     }
 
-    // In-memory fallback
+    if (isProduction) {
+      const e: any = new Error('Database service unavailable: D1 binding missing');
+      e.status = 503;
+      e.code = 'DB_UNAVAILABLE';
+      throw e;
+    }
+
     const lead = inMemoryLeads.find(l => l.id === leadId);
     if (!lead) throw new Error('Lead not found');
 
@@ -464,20 +560,28 @@ export class PipelineRepository {
   static async fixEmailTypo(
     db: any,
     leadId: string,
-    actor: AuthenticatedCorporateUser
+    actor: AuthenticatedCorporateUser,
+    isProduction = false
   ) {
     if (db) {
       try {
-        const lead = await db.prepare('SELECT * FROM canonical_leads WHERE lead_id_display = ? OR id = ?').bind(leadId, leadId).first();
-        if (!lead) throw new Error(`Lead ${leadId} not found`);
+        const scope = isWorkspaceWideActor(actor) ? '' : ' AND assigned_user_id = ?';
+        const scopeParams = isWorkspaceWideActor(actor) ? [] : [actor.id];
+        const lead = await db.prepare(`SELECT * FROM canonical_leads WHERE (lead_id_display = ? OR id = ?) AND workspace_id = ?${scope}`).bind(leadId, leadId, actor.workspace_id, ...scopeParams).first();
+        if (!lead) {
+          const error: any = new Error(`Lead ${leadId} not found`);
+          error.status = 404;
+          error.code = 'LEAD_NOT_FOUND';
+          throw error;
+        }
 
         const fixedEmail = (lead.contact_email || '').replace('bogurateXtile', 'boguratextile');
         await db.batch([
           db.prepare(`
             UPDATE canonical_leads
             SET contact_email = ?, normalized_email = ?, updated_at = datetime('now')
-            WHERE id = ?
-          `).bind(fixedEmail, fixedEmail.toLowerCase(), lead.id),
+            WHERE id = ? AND workspace_id = ?
+          `).bind(fixedEmail, fixedEmail.toLowerCase(), lead.id, actor.workspace_id),
           db.prepare(`
             INSERT INTO audit_events (workspace_id, actor_id, actor_type, actor_role, event_type, entity_id, before_state_json, after_state_json, metadata_json)
             VALUES (?, ?, 'USER', ?, 'EMAIL_TYPO_NORMALIZED', ?, ?, ?, ?)
@@ -493,9 +597,23 @@ export class PipelineRepository {
         ]);
 
         return { success: true, leadId: lead.lead_id_display, email: fixedEmail };
-      } catch (err) {
-        console.error('D1 fixEmailTypo error, falling back to in-memory:', err);
+      } catch (err: any) {
+        console.error('D1 fixEmailTypo error:', err);
+        if (err?.status === 404) throw err;
+        if (isProduction) {
+          const e: any = new Error(err.message || 'Database error');
+          e.status = 503;
+          e.code = 'DB_UNAVAILABLE';
+          throw e;
+        }
       }
+    }
+
+    if (isProduction) {
+      const e: any = new Error('Database service unavailable: D1 binding missing');
+      e.status = 503;
+      e.code = 'DB_UNAVAILABLE';
+      throw e;
     }
 
     const lead = inMemoryLeads.find(l => l.id === leadId);
@@ -514,20 +632,28 @@ export class PipelineRepository {
     db: any,
     leadId: string,
     stage: PipelineStage,
-    actor: AuthenticatedCorporateUser
+    actor: AuthenticatedCorporateUser,
+    isProduction = false
   ) {
     if (db) {
       try {
-        const lead = await db.prepare('SELECT * FROM canonical_leads WHERE lead_id_display = ? OR id = ?').bind(leadId, leadId).first();
-        if (!lead) throw new Error(`Lead ${leadId} not found`);
+        const scope = isWorkspaceWideActor(actor) ? '' : ' AND assigned_user_id = ?';
+        const scopeParams = isWorkspaceWideActor(actor) ? [] : [actor.id];
+        const lead = await db.prepare(`SELECT * FROM canonical_leads WHERE (lead_id_display = ? OR id = ?) AND workspace_id = ?${scope}`).bind(leadId, leadId, actor.workspace_id, ...scopeParams).first();
+        if (!lead) {
+          const error: any = new Error(`Lead ${leadId} not found`);
+          error.status = 404;
+          error.code = 'LEAD_NOT_FOUND';
+          throw error;
+        }
 
         const oldStage = lead.stage;
         await db.batch([
           db.prepare(`
             UPDATE canonical_leads
             SET stage = ?, updated_at = datetime('now')
-            WHERE id = ?
-          `).bind(stage, lead.id),
+            WHERE id = ? AND workspace_id = ?
+          `).bind(stage, lead.id, actor.workspace_id),
           db.prepare(`
             INSERT INTO audit_events (workspace_id, actor_id, actor_type, actor_role, event_type, entity_id, before_state_json, after_state_json, metadata_json)
             VALUES (?, ?, 'USER', ?, 'LEAD_STAGE_TRANSITION', ?, ?, ?, ?)
@@ -543,9 +669,23 @@ export class PipelineRepository {
         ]);
 
         return { success: true, leadId: lead.lead_id_display, oldStage, newStage: stage };
-      } catch (err) {
-        console.error('D1 transitionStage error, falling back to in-memory:', err);
+      } catch (err: any) {
+        console.error('D1 transitionStage error:', err);
+        if (err?.status === 404) throw err;
+        if (isProduction) {
+          const e: any = new Error(err.message || 'Database error');
+          e.status = 503;
+          e.code = 'DB_UNAVAILABLE';
+          throw e;
+        }
       }
+    }
+
+    if (isProduction) {
+      const e: any = new Error('Database service unavailable: D1 binding missing');
+      e.status = 503;
+      e.code = 'DB_UNAVAILABLE';
+      throw e;
     }
 
     const lead = inMemoryLeads.find(l => l.id === leadId);

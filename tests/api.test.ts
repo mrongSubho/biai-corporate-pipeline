@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import app from '../src/server/index.ts';
 import { createTestD1Database } from './d1-helper.ts';
+import { retryQueuedPipelineDeliveries } from '../src/server/delivery_retry.ts';
 
 describe('BIAI Task 2 Pipeline — API Security, Financial Trust & D1 Persistence', () => {
   let d1: ReturnType<typeof createTestD1Database>;
@@ -26,8 +27,17 @@ describe('BIAI Task 2 Pipeline — API Security, Financial Trust & D1 Persistenc
     expect(json.benchmark_date).toBe('2026-11-01');
   });
 
+  it('Unauthenticated requests to protected Pipeline endpoints are strictly denied with 401', async () => {
+    const res = await app.request('/api/v1/leads', {}, env);
+    expect(res.status).toBe(401);
+    const json: any = await res.json();
+    expect(json.code).toBe('UNAUTHORIZED');
+  });
+
   it('GET /api/v1/leads strictly reconciles Cleaned Mode from D1 (23 leads, 3.17M value, 550k receivables)', async () => {
-    const res = await app.request('/api/v1/leads?mode=cleaned', {}, env);
+    const res = await app.request('/api/v1/leads?mode=cleaned', {
+      headers: { 'Authorization': 'Bearer mgr-token' }
+    }, env);
     expect(res.status).toBe(200);
     const json: any = await res.json();
 
@@ -42,13 +52,59 @@ describe('BIAI Task 2 Pipeline — API Security, Financial Trust & D1 Persistenc
   });
 
   it('GET /api/v1/leads strictly reconciles Raw Mode from D1 (25 leads, 4.22M value)', async () => {
-    const res = await app.request('/api/v1/leads?mode=raw', {}, env);
+    const res = await app.request('/api/v1/leads?mode=raw', {
+      headers: { 'Authorization': 'Bearer mgr-token' }
+    }, env);
     expect(res.status).toBe(200);
     const json: any = await res.json();
 
     expect(json.mode).toBe('raw');
     expect(json.total_leads).toBe(25);
     expect(json.total_deal_value_bdt).toBe(4220000);
+  });
+
+  it('Account executives can only read and mutate assigned leads', async () => {
+    d1.rawDb.prepare("UPDATE canonical_leads SET assigned_user_id = 'usr_b2b_ae' WHERE lead_id_display = 'L01'").run();
+
+    const assigned = await app.request('/api/v1/leads?mode=raw', {
+      headers: { 'Authorization': 'Bearer ae-token' }
+    }, env);
+    expect(assigned.status).toBe(200);
+    const assignedJson: any = await assigned.json();
+    expect(assignedJson.leads.every((lead: any) => lead.id === 'L01')).toBe(true);
+
+    const denied = await app.request('/api/v1/hygiene/fix-typo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ae-token' },
+      body: JSON.stringify({ leadId: 'L18' })
+    }, env);
+    expect(denied.status).toBe(404);
+  });
+
+  it('scheduled delivery retry sends a queued email and records provider state', async () => {
+    await d1.prepare(`
+      INSERT INTO outbound_emails (
+        id, workspace_id, lead_id, recipient_email, recipient_name,
+        subject, body_text, tone, status, approved_by, idempotency_key,
+        retry_count, delivery_status, next_retry_at, manual_dispatch_required
+      ) VALUES (?, 'ws_biai_b2b', 'can_L01', ?, ?, ?, ?, 'POLITE_CHECKIN', 'APPROVED', 'usr_b2b_mgr', ?, 0, 'QUEUED', NULL, 0)
+    `).bind(
+      'em_retry_pipeline',
+      'retry@example.com',
+      'Retry Contact',
+      'Retry subject',
+      'Retry body',
+      'pipeline_ws_biai_b2b_em_retry_pipeline'
+    ).run();
+
+    const result = await retryQueuedPipelineDeliveries(d1, env);
+    const row: any = await d1.prepare('SELECT delivery_status, provider_message_id, retry_count FROM outbound_emails WHERE id = ?')
+      .bind('em_retry_pipeline').first();
+
+    expect(result.sent).toBe(1);
+    expect(row.delivery_status).toBe('SENT');
+    expect(row.provider_message_id).toMatch(/^mock_email_/);
+    expect(row.retry_count).toBe(0);
   });
 
   it('POST /api/v1/hygiene/remediate-date rejects RESCHEDULE strategy when date is omitted', async () => {
@@ -126,7 +182,7 @@ describe('BIAI Task 2 Pipeline — API Security, Financial Trust & D1 Persistenc
   it('POST /api/v1/copilot/query executes allowlisted AST queries and returns dual-truth variance', async () => {
     const res = await app.request('/api/v1/copilot/query', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer mgr-token' },
       body: JSON.stringify({ question: 'What is the total value in Proposal stage?' })
     }, env);
     expect(res.status).toBe(200);
@@ -138,7 +194,7 @@ describe('BIAI Task 2 Pipeline — API Security, Financial Trust & D1 Persistenc
   it('POST /api/v1/copilot/query rejects unsupported questions with 422 and helpful guidelines', async () => {
     const res = await app.request('/api/v1/copilot/query', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer mgr-token' },
       body: JSON.stringify({ question: 'Can you tell me the weather forecast for Dhaka tomorrow?' })
     }, env);
     expect(res.status).toBe(422);
@@ -182,10 +238,11 @@ describe('BIAI Task 2 Pipeline — API Security, Financial Trust & D1 Persistenc
     expect(json.success).toBe(true);
     expect(json.delivery.status).toBe('SENT');
 
-    // Verify written to D1 outbound_emails and audit_events
+    // Verify written to D1 outbound_emails with delivery_status 'SENT'
     const emailRow = d1.rawDb.prepare("SELECT * FROM outbound_emails WHERE lead_id = 'can_L07'").get() as any;
     expect(emailRow).toBeTruthy();
     expect(emailRow.tone).toBe('INVOICE_REMINDER');
+    expect(emailRow.delivery_status).toBe('SENT');
   });
 
   it('POST /api/v1/leads/export returns server-generated CSV with SHA-256 header and PII masking', async () => {
@@ -201,11 +258,83 @@ describe('BIAI Task 2 Pipeline — API Security, Financial Trust & D1 Persistenc
 
     const csvText = await res.text();
     expect(csvText).toContain('Lead ID,Company,Industry');
-    // Verify phone is masked
     expect(csvText).toContain('***');
 
-    // Verify audit event written to D1
     const audit = d1.rawDb.prepare("SELECT * FROM audit_events WHERE event_type = 'CLEANED_CSV_EXPORTED'").get() as any;
     expect(audit).toBeTruthy();
+  });
+
+  // ============================================================================
+  // IDENTITY CONTROL PLANE INTEGRATION TESTS
+  // ============================================================================
+  it('Identity Control Plane: Login verification, session creation, CSRF enforcement, and lockout in Pipeline', async () => {
+    // 1. Login with invalid password
+    const failRes = await app.request('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'shakib@biai.com.bd', password: 'WrongPassword123!' })
+    }, env);
+    expect(failRes.status).toBe(401);
+
+    // 2. Successful Login with seeded PBKDF2 credentials
+    const loginRes = await app.request('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'shakib@biai.com.bd', password: 'SupervisorPassword2026!' })
+    }, env);
+    expect(loginRes.status).toBe(200);
+    const loginData: any = await loginRes.json();
+    expect(loginData.sessionToken).toBeTruthy();
+    expect(loginData.csrfToken).toBeTruthy();
+    expect(loginData.user.role).toBe('TEAM_LEAD');
+    expect(loginData.user.security_tier).toBe('TIER_2');
+
+    const cookieHeader = loginRes.headers.get('Set-Cookie');
+    expect(cookieHeader).toContain('__Host-biai_session=');
+
+    // 3. GET /api/auth/me using Cookie session
+    const meRes = await app.request('/api/auth/me', {
+      headers: { 'Cookie': `__Host-biai_session=${loginData.sessionToken}` }
+    }, env);
+    expect(meRes.status).toBe(200);
+    const meData: any = await meRes.json();
+    expect(meData.email).toBe('shakib@biai.com.bd');
+
+    // 4. CSRF enforcement: Mutating request with Cookie session and missing CSRF token -> 403
+    const noCsrfRes = await app.request('/api/v1/hygiene/remediate-date', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cookie': `__Host-biai_session=${loginData.sessionToken}`
+      },
+      body: JSON.stringify({ leadId: 'L25', strategy: 'RESCHEDULE', newFollowup: '2026-11-05' })
+    }, env);
+    expect(noCsrfRes.status).toBe(403);
+    const noCsrfJson: any = await noCsrfRes.json();
+    expect(noCsrfJson.code).toBe('CSRF_MISSING');
+
+    // 5. Mutating request with valid X-CSRF-Token -> 200
+    const validCsrfRes = await app.request('/api/v1/hygiene/remediate-date', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cookie': `__Host-biai_session=${loginData.sessionToken}`,
+        'X-CSRF-Token': loginData.csrfToken
+      },
+      body: JSON.stringify({ leadId: 'L25', strategy: 'RESCHEDULE', newFollowup: '2026-11-05' })
+    }, env);
+    expect(validCsrfRes.status).toBe(200);
+
+    // 6. Logout revokes session in D1
+    const logoutRes = await app.request('/api/auth/logout', {
+      method: 'POST',
+      headers: { 'Cookie': `__Host-biai_session=${loginData.sessionToken}` }
+    }, env);
+    expect(logoutRes.status).toBe(200);
+
+    const meAfterLogout = await app.request('/api/auth/me', {
+      headers: { 'Cookie': `__Host-biai_session=${loginData.sessionToken}` }
+    }, env);
+    expect(meAfterLogout.status).toBe(401);
   });
 });
