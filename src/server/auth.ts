@@ -16,6 +16,19 @@ export type SecurityTier = 'TIER_0' | 'TIER_1' | 'TIER_2' | 'TIER_3' | 'TIER_4';
 
 export type UserStatus = 'INVITED' | 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
 
+export function normalizeStoredRole(role: string): UserRole {
+  if (role === 'ADMIN') return 'PLATFORM_OWNER';
+  if (role === 'SALES_MANAGER') return 'TEAM_LEAD';
+  if (role === 'ACCOUNT_EXECUTIVE') return 'SPECIALIST_OPERATOR';
+  return role as UserRole;
+}
+
+export function toStoredRole(role: UserRole): 'ADMIN' | 'SALES_MANAGER' | 'ACCOUNT_EXECUTIVE' {
+  if (role === 'PLATFORM_OWNER' || role === 'OPERATIONS_ADMIN') return 'ADMIN';
+  if (role === 'TEAM_LEAD') return 'SALES_MANAGER';
+  return 'ACCOUNT_EXECUTIVE';
+}
+
 export interface AuthenticatedUser {
   id: string;
   workspace_id: string;
@@ -206,7 +219,7 @@ export function createAuthMiddleware(appKey: 'CRM' | 'PIPELINE' = 'PIPELINE'): M
               email: sessionRow.email,
               full_name: sessionRow.full_name,
               department: sessionRow.department,
-              role: sessionRow.role as UserRole,
+              role: normalizeStoredRole(sessionRow.role as string),
               security_tier: sessionRow.security_tier as SecurityTier,
               status: sessionRow.status as UserStatus,
               scopes,

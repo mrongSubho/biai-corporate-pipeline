@@ -5,73 +5,41 @@
 
 PRAGMA foreign_keys = OFF;
 
--- 1. Table Rebuild for users to introduce Tiered Roles & Lockout Columns
-CREATE TABLE users_new (
-    id TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL REFERENCES workspaces(id),
-    email TEXT NOT NULL UNIQUE,
-    normalized_email TEXT NOT NULL,
-    full_name TEXT NOT NULL,
-    department TEXT,
-    password_hash TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN (
-        'PLATFORM_OWNER',
-        'OPERATIONS_ADMIN',
-        'TEAM_LEAD',
-        'SPECIALIST_OPERATOR',
-        'READ_ONLY_AUDITOR'
-    )),
-    security_tier TEXT NOT NULL CHECK (
-        security_tier IN ('TIER_0', 'TIER_1', 'TIER_2', 'TIER_3', 'TIER_4')
-    ),
-    status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (
-        status IN ('INVITED', 'ACTIVE', 'SUSPENDED', 'DEACTIVATED')
-    ),
-    failed_login_count INTEGER NOT NULL DEFAULT 0,
-    locked_until TEXT,
-    password_changed_at TEXT,
-    mfa_required INTEGER NOT NULL DEFAULT 1,
-    last_login_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (workspace_id, normalized_email)
-);
+INSERT OR IGNORE INTO workspaces (id, name, default_currency, benchmark_date)
+VALUES ('ws_biai_b2b', 'BIAI Corporate Pipeline', 'BDT', '2026-11-01');
 
--- Copy existing users with role mapping and PBKDF2 password hashes
-INSERT INTO users_new (
-    id, workspace_id, email, normalized_email, full_name, department, password_hash, role, security_tier, status, failed_login_count, mfa_required, created_at, updated_at
-)
-SELECT 
-    id,
-    workspace_id,
-    email,
-    lower(email),
-    full_name,
-    CASE 
-        WHEN role = 'ADMIN' THEN 'Executive Management'
-        WHEN role = 'SALES_MANAGER' THEN 'Enterprise Sales'
-        ELSE 'Account Executive'
-    END,
-    'disabled_pending_bootstrap',
-    CASE 
-        WHEN role = 'ADMIN' THEN 'PLATFORM_OWNER'
-        WHEN role = 'SALES_MANAGER' THEN 'TEAM_LEAD'
-        ELSE 'SPECIALIST_OPERATOR'
-    END,
-    CASE 
-        WHEN role = 'ADMIN' THEN 'TIER_0'
-        WHEN role = 'SALES_MANAGER' THEN 'TIER_2'
-        ELSE 'TIER_3'
-    END,
-    CASE WHEN id IN ('usr_b2b_admin', 'usr_b2b_mgr', 'usr_b2b_ae') THEN 'DEACTIVATED' ELSE 'ACTIVE' END,
-    0,
-    CASE WHEN role = 'ADMIN' THEN 1 ELSE 0 END,
-    created_at,
-    datetime('now')
-FROM users;
+-- 1. Extend the existing users table in place. D1 runs migrations in a
+-- transaction where PRAGMA foreign_keys cannot be toggled safely; rebuilding
+-- users would invalidate existing pipeline foreign keys and production data.
+ALTER TABLE users ADD COLUMN normalized_email TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN department TEXT;
+ALTER TABLE users ADD COLUMN security_tier TEXT NOT NULL DEFAULT 'TIER_3';
+ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE';
+ALTER TABLE users ADD COLUMN failed_login_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN locked_until TEXT;
+ALTER TABLE users ADD COLUMN password_changed_at TEXT;
+ALTER TABLE users ADD COLUMN mfa_required INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN last_login_at TEXT;
+ALTER TABLE users ADD COLUMN updated_at TEXT;
 
-DROP TABLE users;
-ALTER TABLE users_new RENAME TO users;
+UPDATE users
+SET normalized_email = lower(email),
+    department = CASE
+      WHEN role = 'ADMIN' THEN 'Executive Management'
+      WHEN role = 'SALES_MANAGER' THEN 'Enterprise Sales'
+      ELSE 'Account Executive'
+    END,
+    security_tier = CASE
+      WHEN role = 'ADMIN' THEN 'TIER_0'
+      WHEN role = 'SALES_MANAGER' THEN 'TIER_2'
+      ELSE 'TIER_3'
+    END,
+    status = CASE
+      WHEN is_active = 1 THEN 'ACTIVE'
+      ELSE 'DEACTIVATED'
+    END,
+    mfa_required = CASE WHEN role = 'ADMIN' THEN 1 ELSE 0 END,
+    updated_at = datetime('now');
 
 CREATE INDEX IF NOT EXISTS idx_users_workspace ON users(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_users_normalized_email ON users(normalized_email);
@@ -235,7 +203,14 @@ CREATE TABLE audit_events_new (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-INSERT INTO audit_events_new SELECT * FROM audit_events;
+INSERT INTO audit_events_new (
+    id, workspace_id, actor_id, actor_type, actor_role, event_type,
+    entity_id, before_state_json, after_state_json, metadata_json, created_at
+)
+SELECT
+    id, workspace_id, actor_id, 'USER', actor_role, event_type,
+    entity_id, before_state_json, after_state_json, metadata_json, created_at
+FROM audit_events;
 DROP TABLE audit_events;
 ALTER TABLE audit_events_new RENAME TO audit_events;
 

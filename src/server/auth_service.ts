@@ -10,7 +10,7 @@ import {
   constantTimeCompare
 } from './crypto.js';
 import { checkRateLimit } from './rate_limiter.js';
-import { parseSqlUtc, type AuthenticatedUser, type SecurityTier, type UserRole, type UserStatus } from './auth.js';
+import { normalizeStoredRole, toStoredRole, parseSqlUtc, type AuthenticatedUser, type SecurityTier, type UserRole, type UserStatus } from './auth.js';
 
 export interface LoginParams {
   email: string;
@@ -351,7 +351,7 @@ export class AuthService {
           email: user.email,
           full_name: user.full_name,
           department: user.department,
-          role: user.role,
+          role: normalizeStoredRole(user.role),
           security_tier: user.security_tier,
           scopes
         }
@@ -616,7 +616,7 @@ export class AuthService {
       params.fullName.trim(),
       params.department || 'Operations',
       placeholderHash,
-      params.role,
+      toStoredRole(params.role),
       params.securityTier
     ).run();
 
@@ -726,7 +726,7 @@ export class AuthService {
     }
 
     const existingOwner = await this.db.prepare(`
-      SELECT id, email FROM users WHERE role = 'PLATFORM_OWNER' AND status = 'ACTIVE' LIMIT 1
+      SELECT id, email FROM users WHERE role IN ('PLATFORM_OWNER', 'ADMIN') AND status = 'ACTIVE' LIMIT 1
     `).first();
 
     if (existingOwner && !this.env?.INITIAL_OWNER_BOOTSTRAP_TOKEN) {
@@ -746,7 +746,7 @@ export class AuthService {
       await this.db.prepare(`
         UPDATE users SET
           email = ?, normalized_email = ?, full_name = ?, password_hash = ?,
-          role = 'PLATFORM_OWNER', security_tier = 'TIER_0', status = 'ACTIVE',
+          role = 'ADMIN', security_tier = 'TIER_0', status = 'ACTIVE',
           failed_login_count = 0, locked_until = NULL, updated_at = datetime('now')
         WHERE id = ?
       `).bind(params.email.trim(), normalizedEmail, params.fullName.trim(), passwordHash, existingOwner.id).run();
