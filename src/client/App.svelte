@@ -1046,18 +1046,19 @@
         </div>
       </div>
 
-      <!-- Main Surface: Board or Table -->
-      <div class="flex-1 overflow-auto overscroll-contain p-4 min-h-0">
+      <!-- Main Surface: Board or Table (FIT IN VIEWPORT, ZERO BOARD SCROLL) -->
+      <div class="flex-1 min-h-0 overflow-hidden">
         {#if layoutMode === 'board'}
-          <!-- 4-COLUMN ACTIVE STAGE WORKSPACE + CLOSED DEALS SECTION -->
-          <div class="space-y-4">
-            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 items-start">
+          <!-- 4-COLUMN ACTIVE STAGE WORKSPACE (BOARD DOES NOT SCROLL, INNER COLUMNS SCROLL) -->
+          <div class="h-full flex flex-col min-h-0 p-3.5 gap-3 overflow-hidden">
+            <!-- Columns Grid (Takes remaining height, columns scroll internally) -->
+            <div class="flex-1 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 min-h-0 overflow-hidden">
               {#each ['Contacted', 'Meeting', 'Proposal', 'Invoice sent'] as stage}
                 {@const stageLeads = filteredLeads.filter(l => l.stage === stage)}
                 {@const stageSum = stageLeads.reduce((s, l) => s + (l.deal_value_bdt || 0), 0)}
 
-                <div class="kanban-column bg-warm-100/70 dark:bg-slate-900/60 border border-warm-200 dark:border-slate-800 rounded-xl flex flex-col max-h-[calc(100vh-190px)] min-h-0">
-                  <!-- Stage Header -->
+                <div class="kanban-column bg-warm-100/70 dark:bg-slate-900/60 border border-warm-200 dark:border-slate-800 rounded-xl flex flex-col h-full min-h-0 overflow-hidden shadow-xs">
+                  <!-- Stage Header (Pinned at top of column) -->
                   <div class="p-3 border-b border-warm-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-t-xl flex items-center justify-between shrink-0">
                     <div>
                       <span class="font-semibold text-xs text-slate-800 dark:text-white uppercase tracking-wider">{stage}</span>
@@ -1070,7 +1071,7 @@
                     </span>
                   </div>
 
-                  <!-- Cards Container -->
+                  <!-- Cards Container (ONLY THIS INNER REGION SCROLLS) -->
                   <div class="p-2 overflow-y-auto overscroll-contain space-y-2 flex-1 min-h-0">
                     {#if stageLeads.length === 0}
                       <div class="py-8 text-center text-slate-400 text-xs italic">
@@ -1144,8 +1145,8 @@
               {/each}
             </div>
 
-            <!-- COMPRESSED TERMINAL DEALS (PAID & LOST) -->
-            <div class="bg-warm-100/60 dark:bg-slate-900/40 border border-warm-200 dark:border-slate-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <!-- COMPRESSED TERMINAL DEALS (Pinned at bottom, shrink-0) -->
+            <div class="bg-warm-100/60 dark:bg-slate-900/40 border border-warm-200 dark:border-slate-800 rounded-xl px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
               <div class="flex flex-wrap items-center gap-3">
                 <span class="font-semibold text-slate-700 dark:text-slate-300">Terminal Deals:</span>
                 <span class="text-emerald-700 dark:text-emerald-400 font-mono tabular-nums">
@@ -1160,8 +1161,8 @@
             </div>
           </div>
         {:else}
-          <!-- HIGH-DENSITY DATA HEALTH TABLE VIEW -->
-          <div class="bg-white dark:bg-slate-900 border border-warm-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-xs">
+          <!-- HIGH-DENSITY DATA HEALTH TABLE VIEW (Table body scrolls vertically) -->
+          <div class="h-full overflow-auto overscroll-contain p-4 min-h-0">
             <table class="w-full text-left text-xs border-collapse">
               <thead>
                 <tr class="bg-warm-100 dark:bg-slate-850 border-b border-warm-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold">
@@ -1256,27 +1257,27 @@
     </section>
 
     <!-- ------------------------------------------------------ -->
-    <!-- PANE 3: LEAD DETAIL & REMEDIATION STUDIO (420px Fixed) -->
+    <!-- PANE 3: LEAD DETAIL & REMEDIATION STUDIO (FIT IN ONE PAGE) -->
     <!-- ------------------------------------------------------ -->
-    <main class="detail-panel w-full lg:w-[400px] xl:w-[420px] bg-white dark:bg-slate-900 flex flex-col shrink-0 min-h-0 overflow-y-auto overscroll-contain">
+    <main class="detail-panel w-full lg:w-[400px] xl:w-[420px] bg-white dark:bg-slate-900 flex flex-col shrink-0 h-full min-h-0 overflow-hidden">
       {#if !selectedLead}
         <div class="m-auto text-center py-20 text-slate-400 text-xs">
           Select a lead to inspect details.
         </div>
       {:else}
-        <!-- Inspector Header -->
-        <div class="p-4 border-b border-warm-200 dark:border-slate-800 bg-warm-50/50 dark:bg-slate-900/60 shrink-0">
+        <!-- Inspector Header (Always pinned at top, shrink-0) -->
+        <div class="p-3.5 border-b border-warm-200 dark:border-slate-800 bg-warm-50/50 dark:bg-slate-900/60 shrink-0">
           <div class="flex items-center justify-between">
             <span class="font-mono tabular-nums text-xs font-bold text-orange-700 dark:text-orange-400">{selectedLead.id}</span>
             <span class="font-mono tabular-nums text-sm font-bold text-emerald-700 dark:text-emerald-400">
               ৳ {(selectedLead.deal_value_bdt || 0).toLocaleString()} BDT
             </span>
           </div>
-          <h2 class="text-base font-bold text-slate-900 dark:text-white mt-1">{selectedLead.company}</h2>
-          <p class="text-xs text-slate-500">{selectedLead.industry}</p>
+          <h2 class="text-base font-bold text-slate-900 dark:text-white mt-0.5 truncate">{selectedLead.company}</h2>
+          <p class="text-xs text-slate-500 truncate">{selectedLead.industry}</p>
 
           <!-- Stage Selector -->
-          <div class="mt-3 flex items-center justify-between text-xs">
+          <div class="mt-2.5 flex items-center justify-between text-xs">
             <span class="text-slate-400">Pipeline Stage:</span>
             <select
               value={selectedLead.stage}
@@ -1289,59 +1290,67 @@
           </div>
         </div>
 
-        <!-- Inspector Body -->
-        <div class="p-4 space-y-4 text-xs flex-1">
-          <!-- Contact Dossier -->
-          <div class="bg-warm-50 dark:bg-slate-850 p-3 rounded-lg border border-warm-200 dark:border-slate-800 space-y-1.5">
-            <div class="font-semibold text-slate-700 dark:text-slate-300">Contact Details</div>
-            <div class="text-slate-800 dark:text-slate-200">
-              {selectedLead.contact_name || 'Missing contact name'}
+        <!-- Inspector Body (Fits in one page, flex-1 flex-col overflow-hidden) -->
+        <div class="p-3.5 flex-1 flex flex-col min-h-0 gap-3 overflow-hidden text-xs">
+          <!-- Contact Dossier (Compact, shrink-0) -->
+          <div class="bg-warm-50 dark:bg-slate-850 p-2.5 rounded-lg border border-warm-200 dark:border-slate-800 shrink-0 space-y-1">
+            <div class="font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+              <span>Contact Details</span>
               {#if selectedLead.contact_role}
-                <span class="text-slate-400">({selectedLead.contact_role})</span>
+                <span class="text-slate-400 font-normal text-[10px]">({selectedLead.contact_role})</span>
               {/if}
             </div>
-            <div class="font-mono text-[11px] text-slate-500">
-              Email: {selectedLead.contact_email || 'Missing email'}
+            <div class="text-slate-800 dark:text-slate-200 font-medium truncate">
+              {selectedLead.contact_name || 'Missing contact name'}
             </div>
-            <div class="font-mono tabular-nums text-[11px] text-slate-500">
-              Phone: {selectedLead.contact_phone || 'Missing phone'}
+            <div class="flex items-center justify-between font-mono tabular-nums text-[11px] text-slate-500 pt-0.5">
+              <span class="truncate">{selectedLead.contact_email || 'No email'}</span>
+              <span class="shrink-0">{selectedLead.contact_phone || 'No phone'}</span>
             </div>
           </div>
 
-          <!-- Anomaly Findings for Selected Lead -->
+          <!-- Anomaly Findings for Selected Lead (shrink-0 if present) -->
           {#if selectedLead.id === 'L25'}
-            <div class="bg-purple-50 dark:bg-purple-950/40 p-3 rounded-lg border border-purple-200 dark:border-purple-800">
-              <div class="font-bold text-purple-900 dark:text-purple-200">Date Inversion Detected</div>
-              <p class="text-[11px] text-purple-700 dark:text-purple-300 mt-1">
-                Last Contact ({selectedLead.last_contact}) is after Next Followup ({selectedLead.next_followup}).
-              </p>
-              <button
-                type="button"
-                onclick={() => remediateDateOrder('L25', 'SWAP')}
-                class="mt-2 text-xs font-semibold bg-purple-600 hover:bg-purple-500 text-white px-3 py-1 rounded">
-                Swap Dates
-              </button>
+            <div class="bg-purple-50 dark:bg-purple-950/40 p-2.5 rounded-lg border border-purple-200 dark:border-purple-800 shrink-0">
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="font-bold text-purple-900 dark:text-purple-200 text-xs">Date Inversion Detected</div>
+                  <p class="text-[10px] text-purple-700 dark:text-purple-300 mt-0.5">
+                    Last Contact ({selectedLead.last_contact}) &gt; Next Followup ({selectedLead.next_followup}).
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onclick={() => remediateDateOrder('L25', 'SWAP')}
+                  class="text-[11px] font-semibold bg-purple-600 hover:bg-purple-500 text-white px-2.5 py-1 rounded shrink-0">
+                  Swap Dates
+                </button>
+              </div>
             </div>
           {/if}
 
           {#if selectedLead.id === 'L18' && selectedLead.contact_email?.includes('bogurateXtile')}
-            <div class="bg-amber-50 dark:bg-amber-950/40 p-3 rounded-lg border border-amber-200 dark:border-amber-800">
-              <div class="font-bold text-amber-900 dark:text-amber-200">Email Typo Detected</div>
-              <p class="text-[11px] text-amber-700 dark:text-amber-300 mt-1">
-                Domain contains uppercase typo: <code>bogurateXtile.com</code>
-              </p>
-              <button
-                type="button"
-                onclick={() => fixEmailTypo('L18')}
-                class="mt-2 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white px-3 py-1 rounded">
-                Fix Typo
-              </button>
+            <div class="bg-amber-50 dark:bg-amber-950/40 p-2.5 rounded-lg border border-amber-200 dark:border-amber-800 shrink-0">
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="font-bold text-amber-900 dark:text-amber-200 text-xs">Email Typo Detected</div>
+                  <p class="text-[10px] text-amber-700 dark:text-amber-300 mt-0.5">
+                    Uppercase typo: <code>bogurateXtile.com</code>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onclick={() => fixEmailTypo('L18')}
+                  class="text-[11px] font-semibold bg-amber-600 hover:bg-amber-500 text-white px-2.5 py-1 rounded shrink-0">
+                  Fix Typo
+                </button>
+              </div>
             </div>
           {/if}
 
-          <!-- AI Follow-up Email Drafter -->
-          <div class="space-y-2 pt-2 border-t border-warm-200 dark:border-slate-800">
-            <div class="flex items-center justify-between">
+          <!-- AI Follow-up Email Studio (flex-1 flex-col min-h-0) -->
+          <div class="flex-1 flex flex-col min-h-0 pt-2 border-t border-warm-200 dark:border-slate-800 overflow-hidden">
+            <div class="flex items-center justify-between pb-2 shrink-0">
               <span class="font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider text-[11px]">
                 AI Follow-up Email Studio
               </span>
@@ -1356,27 +1365,32 @@
 
             {#if emailDraft}
               {#if emailDraft.is_blocked}
-                <div class="bg-rose-50 dark:bg-rose-950/40 p-3 rounded-lg border border-rose-300 dark:border-rose-800 text-rose-900 dark:text-rose-200">
+                <div class="bg-rose-50 dark:bg-rose-950/40 p-3 rounded-lg border border-rose-300 dark:border-rose-800 text-rose-900 dark:text-rose-200 shrink-0">
                   <div class="font-bold">⚠️ Policy Barrier: DO NOT CONTACT</div>
                   <p class="text-[11px] mt-1">{emailDraft.policy_barrier_reason}</p>
                 </div>
               {:else}
-                <div class="bg-warm-50 dark:bg-slate-850 p-3 rounded-lg border border-warm-200 dark:border-slate-800 space-y-2">
-                  <div class="font-semibold text-slate-800 dark:text-slate-200 text-[11px]">
+                <div class="flex-1 flex flex-col min-h-0 bg-warm-50/80 dark:bg-slate-850 p-2.5 rounded-lg border border-warm-200 dark:border-slate-800 overflow-hidden">
+                  <!-- Email Subject (shrink-0) -->
+                  <div class="font-semibold text-slate-800 dark:text-slate-200 text-[11px] pb-1.5 border-b border-warm-200 dark:border-slate-750 shrink-0 truncate">
                     Subject: {emailDraft.subject}
                   </div>
-                  <div class="whitespace-pre-wrap text-[11px] text-slate-700 dark:text-slate-300 font-sans leading-relaxed">
+
+                  <!-- Email Message Content (ONLY THIS SCROLLS IF LONG) -->
+                  <div class="flex-1 overflow-y-auto overscroll-contain py-2 text-[11px] text-slate-700 dark:text-slate-300 font-sans leading-relaxed whitespace-pre-wrap min-h-0">
                     {emailDraft.body}
                   </div>
 
+                  <!-- Compliance check (shrink-0) -->
                   {#if selectedLead.stage === 'Invoice sent'}
-                    <label class="flex items-center gap-2 text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 p-2 rounded border border-amber-200 dark:border-amber-800 cursor-pointer select-none">
-                      <input type="checkbox" bind:checked={bankConfirmed} class="rounded text-amber-600 w-3.5 h-3.5" />
+                    <label class="flex items-center gap-2 text-[10px] text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 p-1.5 rounded border border-amber-200 dark:border-amber-800 cursor-pointer select-none shrink-0 mt-1">
+                      <input type="checkbox" bind:checked={bankConfirmed} class="rounded text-amber-600 w-3 h-3 shrink-0" />
                       <span>Bank statement checked (no unrecorded payments)</span>
                     </label>
                   {/if}
 
-                  <div class="flex gap-2">
+                  <!-- Actions (shrink-0, pinned at bottom) -->
+                  <div class="flex gap-2 pt-2 border-t border-warm-200 dark:border-slate-750 shrink-0">
                     <button
                       type="button"
                       onclick={() => copyText(emailDraft?.body || '', 'Email draft')}
