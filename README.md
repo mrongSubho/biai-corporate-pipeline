@@ -4,7 +4,8 @@ Production-grade, edge-native B2B Pipeline and Data Hygiene Engine engineered fo
 
 Deployed on **Cloudflare Workers (Edge V8 Isolates) + Cloudflare D1 (Distributed SQLite) + Svelte 5 (Runes)**.
 
-- **Live URL:** https://biai-corporate-pipeline.ludobase.workers.dev
+- **Live Production URL:** https://biaileads.mrong.tech
+- **CRM Triage Workspace:** https://biaicrm.mrong.tech
 - **GitHub Repository:** https://github.com/mrongSubho/biai-corporate-pipeline
 
 ---

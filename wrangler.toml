@@ -32,4 +32,7 @@ ENVIRONMENT = "production"
 DEFAULT_TIMEZONE = "Asia/Dhaka"
 BENCHMARK_DATE = "2026-11-01"
 WORKSPACE_ID = "ws_biai_b2b"
-ALLOWED_ORIGINS = "https://biaileads.mrong.tech,https://biaicrm.mrong.tech"
+ALLOWED_ORIGINS = "https://biaileads.mrong.tech,https://biaicrm.mrong.tech,http://localhost:5173,http://localhost:8787"
+MFA_ENCRYPTION_KEY = "biai_mfa_enc_prod_89f3a9e145b208c901e8a27d3c8b4112"
+RESEND_API_KEY = "re_demo_corporate_pipeline_key"
+
