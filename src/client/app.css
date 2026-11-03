@@ -2,12 +2,51 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --color-canvas: #FAF9F6;
+  --color-surface: #FFFFFF;
+  --color-surface-muted: #F3F2ED;
+  --color-border: #E7E5DD;
+  --color-border-strong: #D5D2C7;
+  --color-text: #1C1B19;
+  --color-text-muted: #6B6861;
+  --color-brand: #C2410C;
+  --color-brand-hover: #9A3412;
+  --color-focus: #2563EB;
+  --color-success: #047857;
+  --color-warning: #B45309;
+  --color-danger: #B91C1C;
+  --color-info: #0369A1;
+
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-bengali: 'Noto Sans Bengali', 'SolaimanLipi', sans-serif;
+}
+
+.dark {
+  --color-canvas: #080C14;
+  --color-surface: #131B2E;
+  --color-surface-muted: #0D1321;
+  --color-border: #243047;
+  --color-border-strong: #334155;
+  --color-text: #F8FAFC;
+  --color-text-muted: #A7B0C0;
+  --color-brand: #FB923C;
+  --color-brand-hover: #FDBA74;
+  --color-focus: #60A5FA;
+}
+
 @layer base {
   * {
     border-color: rgba(218, 215, 205, 0.75);
   }
   .dark * {
     border-color: rgba(255, 255, 255, 0.08);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
   }
 }
 
@@ -47,10 +86,13 @@
 }
 
 /* 3px Left Semantic Rails */
+.rail-critical,
+.rail-p0,
 .rail-overdue {
   border-left: 3px solid #DC2626 !important;
 }
 
+.rail-at-risk,
 .rail-warning {
   border-left: 3px solid #D97706 !important;
 }
@@ -59,6 +101,54 @@
   border-left: 3px solid transparent !important;
 }
 
+.rail-met,
 .rail-paid {
   border-left: 3px solid #059669 !important;
+}
+
+/* High-Legibility Bengali Quote Box */
+.bengali-quote {
+  font-family: var(--font-bengali);
+  line-height: 1.65;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Layout Containment for Render Stability */
+.work-list,
+.kanban-column,
+.detail-panel {
+  contain: layout paint;
+}
+
+.work-card {
+  contain: layout style;
+}
+
+/* Motion Budget & Accessibility Guards */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --color-border: #999488;
+    --color-border-strong: #4A4843;
+  }
+  .dark {
+    --color-border: #64748B;
+    --color-border-strong: #94A3B8;
+  }
+  * {
+    border-color: var(--color-border-strong) !important;
+  }
 }

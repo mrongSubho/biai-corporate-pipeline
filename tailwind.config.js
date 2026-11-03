@@ -28,8 +28,8 @@ export default {
           900: '#1C1B19',
         },
         slate: {
-          850: '#131B2E',
-          950: '#080C14'
+          850: '#131B2E',  /* High-contrast obsidian card */
+          950: '#080C14'   /* Deepest obsidian canvas */
         }
       },
       fontFamily: {
@@ -39,7 +39,8 @@ export default {
       },
       boxShadow: {
         'card': '0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.04)',
-        'card-selected': '0 0 0 2px #C2410C, 0 4px 6px -1px rgba(194, 65, 12, 0.1)'
+        'card-selected': '0 0 0 2px #C2410C, 0 4px 6px -1px rgba(194, 65, 12, 0.1)',
+        'drawer': '-4px 0 24px -2px rgba(0, 0, 0, 0.08)'
       }
     },
   },
