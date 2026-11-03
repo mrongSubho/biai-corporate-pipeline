@@ -392,3 +392,30 @@ HTTP/2 200
 content-type: image/png
 server: cloudflare
 ```
+
+---
+
+## 12. Modern Vector Iconography & Sleek UX Control Plane Overhaul
+
+### 12.1 Zero-Emoji Architecture
+- **Elimination of Unicode Emojis**: All emojis across client templates, buttons, badges, popovers, and headers have been replaced with a zero-dependency SVG vector icon component (`Icon.svelte`).
+- **Crisp Lucide-Grade Vector Icons**: 36+ hand-tuned SVG symbols render with 1.75px stroke width, consistent 24x24 viewBoxes, currentColor fill rules, and CSS sizing classes (`w-3.5 h-3.5`, `w-4 h-4`, etc.).
+
+### 12.2 Account Manager Popover Modernization (`AccountMenu.svelte`)
+- **Live Status Indicator**: Visual dot indicating active account status without layout shift.
+- **Embedded Scope & Role Badges**: User role tiers and permission scopes are displayed directly inline on operator pills, eliminating redundant sub-popovers.
+- **Tactile Toggle Switches**: Crisp toggle controls for Sound Feedback and PII Masking replace crude checkboxes.
+- **Direct Workspace Jump**: Instant navigation to the Control Plane and Messaging Studio.
+
+### 12.3 2-Pane Left Rail Control Plane (`AccountControlModal.svelte`)
+- **Linear/Clerk-Grade Architecture**: Replaced cramped horizontal tabs with an ergonomic 2-pane modal featuring a left-rail navigation sidebar dividing "Personal Account" (Profile, Security Password Reset) and "Workspace Administration" (User Directory, Create Operator, Audit Activity Log).
+- **Slide-Over Operator Drawer**: Operator creation and credential management open inside a smooth slide-over drawer within the modal viewport, eliminating `z-60` stacked modals and browser `window.confirm()` dialogs.
+- **1-Click Password Generator**: Generates cryptographically strong temporary credentials with inline copy-to-clipboard confirmation.
+- **Monospace Audit Badges**: Formatted actor, action, and target badges provide immediate visual scanning of administrative events.
+
+### 12.4 Command Messaging Center Modernization (`MessagingCenterModal.svelte`)
+- **Stale-While-Revalidate Thread Loading**: Retains active chat history during thread switches to eliminate blank loading flashes.
+- **Real-Time Search Filter**: Instant client-side search across message subjects, bodies, and sender identities.
+- **Auto-Scrolling Stream**: Chat log smoothly anchors to the newest transmissions upon receipt.
+- **Slide-Over Directive Drawer**: Operational directives can be composed and dispatched with targeted priority and acknowledgment requirements from a contextual side drawer.
+

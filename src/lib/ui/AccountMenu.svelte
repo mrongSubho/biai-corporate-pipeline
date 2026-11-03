@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import Icon from './Icon.svelte';
 
   interface OperatorUser {
     id: string;
@@ -7,6 +8,7 @@
     full_name: string;
     role: string;
     security_tier: string;
+    department?: string;
     scopes?: string[];
   }
 
@@ -37,8 +39,8 @@
   }: Props = $props();
 
   let menuOpen = $state(false);
-  let showProfileModal = $state(false);
   let showShortcutsModal = $state(false);
+  let showScopesExpanded = $state(false);
   let menuContainer: HTMLDivElement | null = $state(null);
   let triggerButton: HTMLButtonElement | null = $state(null);
 
@@ -99,36 +101,42 @@
       aria-haspopup="menu"
       aria-expanded={menuOpen}
       title={collapsed ? `${currentUser.full_name} (${currentUser.role})` : undefined}
-      class={`w-full flex items-center gap-2.5 p-2 rounded-xl transition text-left cursor-pointer border ${
+      class={`group relative w-full flex items-center gap-2.5 p-2 rounded-xl transition-all duration-150 text-left cursor-pointer border ${
         menuOpen
-          ? 'bg-warm-100 border-warm-300 dark:bg-slate-800 dark:border-slate-700'
-          : 'bg-transparent hover:bg-warm-100 border-transparent hover:border-warm-200 dark:hover:bg-slate-800/60 dark:hover:border-slate-800'
+          ? 'bg-warm-100/90 border-warm-300 dark:bg-slate-800 dark:border-slate-700 shadow-xs'
+          : 'bg-transparent hover:bg-warm-100/70 border-transparent hover:border-warm-200 dark:hover:bg-slate-800/60 dark:hover:border-slate-800'
       }`}>
       
-      <!-- 32px Initials Avatar -->
-      <div class="w-8 h-8 rounded-lg bg-orange-600/10 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300 font-mono font-bold text-xs flex items-center justify-center shrink-0 border border-orange-600/20">
-        {initials}
+      <!-- Monogram Avatar with Status Dot -->
+      <div class="relative shrink-0">
+        <div class="w-8 h-8 rounded-lg bg-orange-600/10 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300 font-mono font-bold text-xs flex items-center justify-center border border-orange-600/25 transition group-hover:scale-[1.02]">
+          {initials}
+        </div>
+        {#if unreadCount > 0}
+          <span class="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-orange-600 border border-white dark:border-slate-900"></span>
+          </span>
+        {/if}
       </div>
 
       {#if !collapsed}
         <!-- Operator Details -->
         <div class="flex-1 min-w-0">
-          <div class="text-xs font-semibold text-slate-900 dark:text-white truncate leading-tight">
-            {currentUser.full_name}
+          <div class="text-xs font-semibold text-slate-900 dark:text-white truncate leading-tight flex items-center gap-1.5">
+            <span>{currentUser.full_name}</span>
           </div>
           <div class="text-[10px] font-mono text-slate-500 dark:text-slate-400 truncate leading-tight mt-0.5">
-            {currentUser.role} · <span class="text-orange-600 dark:text-orange-400">{currentUser.security_tier}</span>
+            {currentUser.role} · <span class="text-orange-600 dark:text-orange-400 font-semibold">{currentUser.security_tier}</span>
           </div>
         </div>
 
         <!-- Chevron Affordance -->
-        <svg
-          class={`w-3.5 h-3.5 text-slate-400 transition-transform duration-150 shrink-0 ${menuOpen ? 'rotate-180' : ''}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-        </svg>
+        <Icon
+          name="chevron-down"
+          size={14}
+          class={`text-slate-400 transition-transform duration-200 shrink-0 ${menuOpen ? 'rotate-180 text-slate-700 dark:text-slate-200' : ''}`}
+        />
       {/if}
     </button>
 
@@ -138,176 +146,162 @@
         role="menu"
         tabindex="-1"
         onkeydown={handleMenuKeydown}
-        class="absolute bottom-full left-0 mb-2 w-64 bg-white dark:bg-slate-900 rounded-xl border border-warm-200 dark:border-slate-800 shadow-xl py-1.5 z-50 text-xs font-sans animate-in fade-in slide-in-from-bottom-2 duration-150">
+        class="absolute bottom-full left-0 mb-2 w-72 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-2xl border border-warm-200 dark:border-slate-800 shadow-2xl p-1.5 z-50 text-xs font-sans animate-in fade-in zoom-in-95 duration-150">
         
         <!-- Header Info in Menu -->
-        <div class="px-3 py-2 border-b border-warm-100 dark:border-slate-800/80">
-          <div class="font-semibold text-slate-900 dark:text-white truncate">{currentUser.full_name}</div>
-          <div class="text-[11px] font-mono text-slate-400 truncate">{currentUser.email}</div>
-          <div class="mt-1 flex items-center gap-1.5">
-            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-            <span class="text-[10px] font-mono text-emerald-600 dark:text-emerald-400">Authenticated ({currentUser.security_tier})</span>
+        <div class="p-3 bg-warm-50/70 dark:bg-slate-855/80 rounded-xl border border-warm-200/60 dark:border-slate-800/80 mb-1">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <div class="font-semibold text-slate-900 dark:text-white truncate">{currentUser.full_name}</div>
+              <div class="text-[11px] font-mono text-slate-500 dark:text-slate-400 truncate mt-0.5">{currentUser.email}</div>
+            </div>
+            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase tracking-wider bg-orange-100 text-orange-800 dark:bg-orange-950/80 dark:text-orange-300 border border-orange-200 dark:border-orange-800 shrink-0">
+              <Icon name="shield-check" size={10} class="text-orange-600 dark:text-orange-400" />
+              {currentUser.security_tier}
+            </span>
           </div>
+
+          <!-- Granted Scopes Strip -->
+          {#if currentUser.scopes && currentUser.scopes.length > 0}
+            <div class="mt-2.5 pt-2 border-t border-warm-200/50 dark:border-slate-800/60">
+              <button
+                type="button"
+                onclick={() => showScopesExpanded = !showScopesExpanded}
+                class="flex items-center justify-between w-full text-[10px] font-mono text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition">
+                <span>{currentUser.scopes.length} Permission Scopes</span>
+                <Icon name={showScopesExpanded ? 'chevron-up' : 'chevron-down'} size={12} />
+              </button>
+              {#if showScopesExpanded}
+                <div class="flex flex-wrap gap-1 mt-1.5 max-h-24 overflow-y-auto font-mono text-[9px]">
+                  {#each currentUser.scopes as sc}
+                    <span class="px-1.5 py-0.5 rounded bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-warm-200 dark:border-slate-800">
+                      {sc}
+                    </span>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          {/if}
         </div>
 
-        <div class="py-1">
+        <div class="space-y-0.5 py-1">
           <!-- 1. Account & Access Controls -->
           <button
             type="button"
             onclick={() => { closeMenu(); onOpenAccountControl?.(); }}
-            class="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800 flex items-center gap-2 transition font-medium">
-            <span class="text-orange-600 dark:text-orange-400">🛡️</span>
-            <span>Account & Access Controls</span>
+            class="w-full text-left px-2.5 py-2 text-slate-700 dark:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800/70 rounded-lg flex items-center justify-between transition group font-medium">
+            <span class="flex items-center gap-2.5">
+              <span class="p-1 rounded-md bg-orange-500/10 text-orange-600 dark:text-orange-400 group-hover:bg-orange-500/20 transition">
+                <Icon name="shield" size={14} />
+              </span>
+              <span>Account & Access Controls</span>
+            </span>
+            <Icon name="chevron-right" size={12} class="text-slate-400 group-hover:translate-x-0.5 transition-transform" />
           </button>
 
           <!-- 2. Command Messages -->
           <button
             type="button"
             onclick={() => { closeMenu(); onOpenMessaging?.(); }}
-            class="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800 flex items-center justify-between transition">
-            <span class="flex items-center gap-2">
-              <span>💬</span>
+            class="w-full text-left px-2.5 py-2 text-slate-700 dark:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800/70 rounded-lg flex items-center justify-between transition group font-medium">
+            <span class="flex items-center gap-2.5">
+              <span class="p-1 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 group-hover:bg-blue-500/20 transition">
+                <Icon name="message-square" size={14} />
+              </span>
               <span>Command Messages</span>
             </span>
             {#if unreadCount > 0}
-              <span class="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-orange-600 text-white font-mono">
+              <span class="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-orange-600 text-white font-mono shadow-xs">
                 {unreadCount}
               </span>
+            {:else}
+              <Icon name="chevron-right" size={12} class="text-slate-400 group-hover:translate-x-0.5 transition-transform" />
             {/if}
           </button>
+        </div>
 
-          <!-- 3. View Quick Profile -->
-          <button
-            type="button"
-            onclick={() => { closeMenu(); showProfileModal = true; }}
-            class="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800 flex items-center gap-2 transition">
-            <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-            </svg>
-            <span>Session Identity Summary</span>
-          </button>
-
-          <!-- 2. Preferences (Theme & Audio) -->
-          <div class="px-3 py-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+        <!-- Section: Preferences -->
+        <div class="pt-2 mt-1 border-t border-warm-100 dark:border-slate-800/80">
+          <div class="px-2.5 pb-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
             Preferences
           </div>
 
+          <!-- Theme Toggle Switch -->
           <button
             type="button"
-            onclick={() => { onToggleTheme(); }}
-            class="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800 flex items-center justify-between transition">
-            <span class="flex items-center gap-2">
-              {#if theme === 'dark'}
-                <svg class="w-3.5 h-3.5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
-              {:else}
-                <svg class="w-3.5 h-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
-              {/if}
-              <span>Theme: {theme === 'dark' ? 'Obsidian Dark' : 'Warm Light'}</span>
+            onclick={onToggleTheme}
+            class="w-full text-left px-2.5 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800/70 rounded-lg flex items-center justify-between transition">
+            <span class="flex items-center gap-2.5">
+              <span class="p-1 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                <Icon name={theme === 'dark' ? 'moon' : 'sun'} size={14} />
+              </span>
+              <span>Theme</span>
             </span>
-            <span class="text-[10px] font-mono text-slate-400">Toggle</span>
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] font-mono text-slate-400">
+                {theme === 'dark' ? 'Obsidian' : 'Ivory'}
+              </span>
+              <!-- Tactile Pill Switch -->
+              <div class={`w-7 h-4 rounded-full transition-colors relative flex items-center p-0.5 ${
+                theme === 'dark' ? 'bg-orange-600' : 'bg-slate-300 dark:bg-slate-700'
+              }`}>
+                <div class={`w-3 h-3 rounded-full bg-white shadow-xs transition-transform ${
+                  theme === 'dark' ? 'translate-x-3' : 'translate-x-0'
+                }`}></div>
+              </div>
+            </div>
           </button>
 
+          <!-- Audio FX Feedback Switch -->
           <button
             type="button"
-            onclick={() => { onToggleAudio(); }}
-            class="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800 flex items-center justify-between transition">
-            <span class="flex items-center gap-2">
-              <span class="text-xs">{audioEnabled ? '🔊' : '🔇'}</span>
-              <span>Audio FX Feedback</span>
+            onclick={onToggleAudio}
+            class="w-full text-left px-2.5 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800/70 rounded-lg flex items-center justify-between transition">
+            <span class="flex items-center gap-2.5">
+              <span class="p-1 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                <Icon name={audioEnabled ? 'volume-2' : 'volume-x'} size={14} />
+              </span>
+              <span>Audio FX</span>
             </span>
-            <span class={`text-[10px] font-mono ${audioEnabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`}>
-              {audioEnabled ? 'Enabled' : 'Muted'}
-            </span>
+            <div class="flex items-center gap-2">
+              <span class={`text-[11px] font-mono ${audioEnabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`}>
+                {audioEnabled ? 'Active' : 'Muted'}
+              </span>
+              <!-- Tactile Pill Switch -->
+              <div class={`w-7 h-4 rounded-full transition-colors relative flex items-center p-0.5 ${
+                audioEnabled ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
+              }`}>
+                <div class={`w-3 h-3 rounded-full bg-white shadow-xs transition-transform ${
+                  audioEnabled ? 'translate-x-3' : 'translate-x-0'
+                }`}></div>
+              </div>
+            </div>
           </button>
 
-          <!-- 3. Keyboard Shortcuts -->
+          <!-- Keyboard Shortcuts -->
           <button
             type="button"
             onclick={() => { closeMenu(); showShortcutsModal = true; }}
-            class="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800 flex items-center gap-2 transition">
-            <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-            </svg>
-            <span>Keyboard Shortcuts</span>
+            class="w-full text-left px-2.5 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800/70 rounded-lg flex items-center justify-between transition group">
+            <span class="flex items-center gap-2.5">
+              <span class="p-1 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                <Icon name="command" size={14} />
+              </span>
+              <span>Shortcuts</span>
+            </span>
+            <span class="text-[10px] font-mono text-slate-400 border border-slate-200 dark:border-slate-700 px-1 py-0.2 rounded">?</span>
           </button>
         </div>
 
-        <!-- 4. Sign Out -->
-        <div class="pt-1 mt-1 border-t border-warm-100 dark:border-slate-800/80">
+        <!-- Section: Sign Out -->
+        <div class="pt-1.5 mt-1 border-t border-warm-100 dark:border-slate-800/80">
           <button
             type="button"
             onclick={() => { closeMenu(); onLogout(); }}
-            class="w-full text-left px-3 py-2 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2 transition font-medium">
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-            </svg>
+            class="w-full text-left px-2.5 py-2 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg flex items-center gap-2.5 transition font-medium">
+            <Icon name="log-out" size={14} class="text-rose-600" />
             <span>Sign Out Session</span>
           </button>
-        </div>
-      </div>
-    {/if}
-
-    <!-- Profile Dialog -->
-    {#if showProfileModal}
-      <div class="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-        <div class="bg-white dark:bg-slate-900 border border-warm-200 dark:border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
-          <div class="flex items-center justify-between border-b border-warm-200 dark:border-slate-800 pb-3">
-            <div class="flex items-center gap-2.5">
-              <div class="w-8 h-8 rounded-lg bg-orange-600/10 text-orange-700 dark:text-orange-300 font-mono font-bold flex items-center justify-center">
-                {initials}
-              </div>
-              <div>
-                <h3 class="text-sm font-bold text-slate-900 dark:text-white">Operator Profile</h3>
-                <p class="text-[11px] text-slate-500 font-mono">Session Scope & Roles</p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onclick={() => showProfileModal = false}
-              class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-sm">
-              ✕
-            </button>
-          </div>
-
-          <div class="space-y-3 text-xs">
-            <div class="flex justify-between py-1.5 border-b border-warm-100 dark:border-slate-800">
-              <span class="text-slate-500">Full Name</span>
-              <span class="font-semibold text-slate-900 dark:text-white">{currentUser.full_name}</span>
-            </div>
-            <div class="flex justify-between py-1.5 border-b border-warm-100 dark:border-slate-800">
-              <span class="text-slate-500">Email</span>
-              <span class="font-mono text-slate-900 dark:text-white">{currentUser.email}</span>
-            </div>
-            <div class="flex justify-between py-1.5 border-b border-warm-100 dark:border-slate-800">
-              <span class="text-slate-500">Role</span>
-              <span class="font-semibold text-slate-900 dark:text-white">{currentUser.role}</span>
-            </div>
-            <div class="flex justify-between py-1.5 border-b border-warm-100 dark:border-slate-800">
-              <span class="text-slate-500">Security Tier</span>
-              <span class="font-mono text-orange-600 dark:text-orange-400 font-bold">{currentUser.security_tier}</span>
-            </div>
-            {#if currentUser.scopes && currentUser.scopes.length > 0}
-              <div class="py-1.5">
-                <span class="text-slate-500 block mb-1">Granted Permissions</span>
-                <div class="flex flex-wrap gap-1 font-mono text-[10px]">
-                  {#each currentUser.scopes as sc}
-                    <span class="px-2 py-0.5 rounded bg-warm-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                      {sc}
-                    </span>
-                  {/each}
-                </div>
-              </div>
-            {/if}
-          </div>
-
-          <div class="pt-3 border-t border-warm-200 dark:border-slate-800 flex justify-end">
-            <button
-              type="button"
-              onclick={() => showProfileModal = false}
-              class="px-4 py-1.5 rounded-lg bg-warm-100 hover:bg-warm-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-medium transition">
-              Close
-            </button>
-          </div>
         </div>
       </div>
     {/if}
@@ -317,40 +311,41 @@
       <div class="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
         <div class="bg-white dark:bg-slate-900 border border-warm-200 dark:border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
           <div class="flex items-center justify-between border-b border-warm-200 dark:border-slate-800 pb-3">
-            <h3 class="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <span>⌨️</span>
-              <span>Keyboard Shortcuts Reference</span>
-            </h3>
+            <div class="flex items-center gap-2.5">
+              <span class="p-1.5 rounded-lg bg-orange-600/10 text-orange-600 dark:text-orange-400">
+                <Icon name="command" size={18} />
+              </span>
+              <h3 class="text-sm font-bold text-slate-900 dark:text-white">Workspace Shortcuts</h3>
+            </div>
             <button
               type="button"
               onclick={() => showShortcutsModal = false}
-              class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-sm">
-              ✕
+              class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg">
+              <Icon name="x" size={16} />
             </button>
           </div>
 
           <div class="space-y-2 text-xs">
             <div class="flex justify-between items-center py-1.5 border-b border-warm-100 dark:border-slate-800">
-              <span class="text-slate-600 dark:text-slate-300">Global Search / Copilot</span>
-              <kbd class="px-2 py-0.5 rounded font-mono text-[11px] bg-warm-100 dark:bg-slate-800 border border-warm-200 dark:border-slate-700 text-slate-800 dark:text-slate-200">⌘K / Ctrl+K</kbd>
+              <span class="text-slate-600 dark:text-slate-300">Global Search</span>
+              <kbd class="font-mono text-[11px] bg-warm-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-warm-200 dark:border-slate-700">⌘K / Ctrl+K</kbd>
             </div>
             <div class="flex justify-between items-center py-1.5 border-b border-warm-100 dark:border-slate-800">
-              <span class="text-slate-600 dark:text-slate-300">Inspect Deal / Row</span>
-              <kbd class="px-2 py-0.5 rounded font-mono text-[11px] bg-warm-100 dark:bg-slate-800 border border-warm-200 dark:border-slate-700 text-slate-800 dark:text-slate-200">Enter / Space</kbd>
+              <span class="text-slate-600 dark:text-slate-300">Next / Prev Lead</span>
+              <kbd class="font-mono text-[11px] bg-warm-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-warm-200 dark:border-slate-700">J / K or ↓ / ↑</kbd>
             </div>
             <div class="flex justify-between items-center py-1.5 border-b border-warm-100 dark:border-slate-800">
-              <span class="text-slate-600 dark:text-slate-300">Close Modal / Dismiss Menu</span>
-              <kbd class="px-2 py-0.5 rounded font-mono text-[11px] bg-warm-100 dark:bg-slate-800 border border-warm-200 dark:border-slate-700 text-slate-800 dark:text-slate-200">Escape</kbd>
+              <span class="text-slate-600 dark:text-slate-300">Open Deal Inspector</span>
+              <kbd class="font-mono text-[11px] bg-warm-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-warm-200 dark:border-slate-700">Enter</kbd>
             </div>
-          </div>
-
-          <div class="pt-3 border-t border-warm-200 dark:border-slate-800 flex justify-end">
-            <button
-              type="button"
-              onclick={() => showShortcutsModal = false}
-              class="px-4 py-1.5 rounded-lg bg-warm-100 hover:bg-warm-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-medium transition">
-              Close
-            </button>
+            <div class="flex justify-between items-center py-1.5 border-b border-warm-100 dark:border-slate-800">
+              <span class="text-slate-600 dark:text-slate-300">Switch Board / Table View</span>
+              <kbd class="font-mono text-[11px] bg-warm-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-warm-200 dark:border-slate-700">1 / 2</kbd>
+            </div>
+            <div class="flex justify-between items-center py-1.5">
+              <span class="text-slate-600 dark:text-slate-300">Close Overlay / Drawer</span>
+              <kbd class="font-mono text-[11px] bg-warm-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-warm-200 dark:border-slate-700">Esc</kbd>
+            </div>
           </div>
         </div>
       </div>

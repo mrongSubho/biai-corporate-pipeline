@@ -8,6 +8,7 @@
   import AccountMenu from '../lib/ui/AccountMenu.svelte';
   import AccountControlModal from '../lib/ui/AccountControlModal.svelte';
   import MessagingCenterModal from '../lib/ui/MessagingCenterModal.svelte';
+  import Icon from '../lib/ui/Icon.svelte';
   import type { CorporateLead, PipelineStage, AnomalyFinding } from '../lib/types/pipeline';
 
   // --- STATE WITH SVELTE 5 RUNES ---
@@ -203,9 +204,9 @@
   function toggleAudio() {
     audioEnabled = soundFx.toggle();
     if (audioEnabled) {
-      showFeedback('🔊 Audio FX enabled (Web Audio synthesized)');
+      showFeedback('Audio FX enabled (Web Audio synthesized)');
     } else {
-      showFeedback('🔇 Audio FX muted');
+      showFeedback('Audio FX muted');
     }
   }
 
@@ -630,8 +631,9 @@
       {#if searchQuery}
         <button
           onclick={() => searchQuery = ''}
-          class="absolute inset-y-0 right-2 my-auto h-5 px-1.5 text-[10px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 flex items-center">
-          ✕ Clear
+          class="absolute inset-y-0 right-2 my-auto h-5 px-1.5 text-[10px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 flex items-center gap-1">
+          <Icon name="x" size={11} />
+          <span>Clear</span>
         </button>
       {/if}
     </div>
@@ -679,7 +681,7 @@
         onclick={() => { messagingContext = null; showMessagingModal = true; }}
         class="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-warm-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800 transition flex items-center gap-1.5 shadow-xs"
         title="Open Internal Command Messaging">
-        <span>💬</span>
+        <Icon name="message-square" size={14} class="text-orange-600 dark:text-orange-400" />
         <span class="hidden md:inline">Messages</span>
         {#if unreadSummary.unreadDirectivesCount > 0}
           <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold bg-rose-600 text-white animate-pulse">
@@ -1013,7 +1015,9 @@
             <button
               type="button"
               onclick={() => mobileNavOpen = false}
-              class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-sm">✕</button>
+              class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1">
+              <Icon name="x" size={16} />
+            </button>
           </div>
 
           <div class="flex-1 overflow-y-auto overscroll-contain p-3 space-y-4 min-h-0">
@@ -1345,9 +1349,9 @@
                   messagingContext = { type: 'LEAD', id: selectedLead.id, label: selectedLead.company };
                   showMessagingModal = true;
                 }}
-                class="px-2 py-1 rounded bg-warm-100 hover:bg-warm-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium transition flex items-center gap-1 shrink-0"
+                class="px-2.5 py-1 rounded-lg bg-warm-100 hover:bg-warm-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium transition flex items-center gap-1.5 shrink-0"
                 title="Escalate lead via internal command directive">
-                <span>💬</span>
+                <Icon name="message-square" size={13} class="text-orange-600 dark:text-orange-400" />
                 <span class="hidden sm:inline">Directive</span>
               </button>
             </div>
@@ -1430,7 +1434,7 @@
             {#if emailDraft}
               {#if emailDraft.is_blocked}
                 <div class="bg-rose-50 dark:bg-rose-950/40 p-3 rounded-lg border border-rose-300 dark:border-rose-800 text-rose-900 dark:text-rose-200 shrink-0">
-                  <div class="font-bold">⚠️ Policy Barrier: DO NOT CONTACT</div>
+                  <div class="font-bold flex items-center gap-1.5"><Icon name="shield-alert" size={14} class="text-rose-600 dark:text-rose-400" /><span>Policy Barrier: DO NOT CONTACT</span></div>
                   <p class="text-[11px] mt-1">{emailDraft.policy_barrier_reason}</p>
                 </div>
               {:else}
@@ -1458,8 +1462,9 @@
                     <button
                       type="button"
                       onclick={() => copyText(emailDraft?.body || '', 'Email draft')}
-                      class="flex-1 text-xs font-semibold bg-warm-200 hover:bg-warm-300 text-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-white py-1.5 rounded transition">
-                      📋 Copy Draft
+                      class="flex-1 text-xs font-semibold bg-warm-200 hover:bg-warm-300 text-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-white py-1.5 rounded transition flex items-center justify-center gap-1.5">
+                      <Icon name="copy" size={13} />
+                      <span>Copy Draft</span>
                     </button>
                     <button
                       type="button"
@@ -1470,7 +1475,8 @@
                         <div class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                         <span>Dispatching...</span>
                       {:else}
-                        <span>🚀 Dispatch Email</span>
+                        <Icon name="send" size={13} />
+                        <span>Dispatch Email</span>
                       {/if}
                     </button>
                   </div>
@@ -1515,9 +1521,9 @@
       <button
         type="button"
         onclick={() => feedbackMessage = null}
-        class="text-slate-400 hover:text-white dark:hover:text-slate-900 text-sm ml-1"
+        class="text-slate-400 hover:text-white dark:hover:text-slate-900 ml-1 inline-flex items-center justify-center"
         aria-label="Dismiss notification">
-        ✕
+        <Icon name="x" size={13} />
       </button>
     </div>
   {/if}
