@@ -908,10 +908,10 @@
   <div class="flex-1 flex overflow-hidden min-h-0 relative">
 
     <!-- ------------------------------------------------------ -->
-    <!-- PANE 1: NAVIGATION & BOTTOM-LEFT ACCOUNT MODULE (240px) -->
+    <!-- PANE 1: NAVIGATION & BOTTOM-LEFT ACCOUNT MODULE (256px) -->
     <!-- ------------------------------------------------------ -->
     <!-- Desktop Sidebar -->
-    <aside class="hidden lg:flex w-60 border-r border-warm-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/50 flex-col shrink-0 min-h-0">
+    <aside class="hidden lg:flex w-64 border-r border-warm-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/50 flex-col shrink-0 min-h-0">
       <!-- Scrollable Nav List -->
       <div class="flex-1 overflow-y-auto overscroll-contain p-3 space-y-4 min-h-0">
         <div>

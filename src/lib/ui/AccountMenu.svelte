@@ -54,6 +54,28 @@
     return parts[0].slice(0, 2).toUpperCase();
   });
 
+  function formatRole(role?: string): string {
+    if (!role) return '';
+    const map: Record<string, string> = {
+      'PLATFORM_OWNER': 'Platform Owner',
+      'OPERATIONS_ADMIN': 'Operations Admin',
+      'OPERATIONS_ADMINISTRATOR': 'Operations Admin',
+      'TEAM_LEAD': 'Team Lead',
+      'SPECIALIST_OPERATOR': 'Specialist',
+      'READ_ONLY_AUDITOR': 'Auditor',
+      'ADMIN': 'Admin',
+      'SUPERVISOR': 'Supervisor',
+      'SALES_REP': 'Sales Rep',
+      'ACCOUNT_EXECUTIVE': 'Account Exec'
+    };
+    return map[role] || role.replace(/_/g, ' ');
+  }
+
+  function formatTier(tier?: string): string {
+    if (!tier) return '';
+    return tier.replace(/_/g, ' ');
+  }
+
   function toggleMenu() {
     menuOpen = !menuOpen;
   }
@@ -117,17 +139,21 @@
             <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
             <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-orange-600 border border-white dark:border-slate-900"></span>
           </span>
+        {:else}
+          <span class="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900" title="Active session"></span>
         {/if}
       </div>
 
       {#if !collapsed}
         <!-- Operator Details -->
         <div class="flex-1 min-w-0">
-          <div class="text-xs font-semibold text-slate-900 dark:text-white truncate leading-tight flex items-center gap-1.5">
-            <span>{currentUser.full_name}</span>
+          <div class="text-xs font-semibold text-slate-900 dark:text-white truncate leading-tight">
+            {currentUser.full_name}
           </div>
-          <div class="text-[10px] font-mono text-slate-500 dark:text-slate-400 truncate leading-tight mt-0.5">
-            {currentUser.role} · <span class="text-orange-600 dark:text-orange-400 font-semibold">{currentUser.security_tier}</span>
+          <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate leading-tight mt-0.5 flex items-center gap-1.5 font-sans">
+            <span class="truncate">{formatRole(currentUser.role)}</span>
+            <span class="text-slate-300 dark:text-slate-600 shrink-0">·</span>
+            <span class="text-orange-600 dark:text-orange-400 font-medium shrink-0 font-mono text-[10px]">{formatTier(currentUser.security_tier)}</span>
           </div>
         </div>
 
@@ -154,10 +180,18 @@
             <div class="min-w-0 flex-1">
               <div class="font-semibold text-slate-900 dark:text-white truncate">{currentUser.full_name}</div>
               <div class="text-[11px] font-mono text-slate-600 dark:text-slate-300 truncate mt-0.5">{currentUser.email}</div>
+              <div class="text-[10px] text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1.5">
+                <span class="font-medium text-slate-700 dark:text-slate-300">{formatRole(currentUser.role)}</span>
+                <span class="text-slate-300 dark:text-slate-600">·</span>
+                <span class="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                  Active Session
+                </span>
+              </div>
             </div>
             <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase tracking-wider bg-orange-100 text-orange-800 dark:bg-orange-950/80 dark:text-orange-300 border border-orange-200 dark:border-orange-800 shrink-0">
               <Icon name="shield-check" size={10} class="text-orange-600 dark:text-orange-400" />
-              {currentUser.security_tier}
+              {formatTier(currentUser.security_tier)}
             </span>
           </div>
 
