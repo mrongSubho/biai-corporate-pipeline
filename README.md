@@ -47,7 +47,7 @@ Deployed on **Cloudflare Workers (Edge V8 Isolates) + Cloudflare D1 (Distributed
 # Navigate to the app directory
 cd apps/task2-pipeline
 
-# Run the automated test suite (16 unit & integration tests)
+# Run the automated test suite (36 unit & integration tests)
 npm test
 
 # Build the production client bundle (<47 KB gzipped)
@@ -133,7 +133,8 @@ apps/task2-pipeline/
 │       ├── fixtures.ts                     # Ingested 25-lead corporate fixture
 │       └── index.ts                        # Edge Hono v4 REST API
 ├── tests/
-│   └── pipeline.test.ts                    # 16 automated integration & unit tests
+│   ├── pipeline.test.ts                    # 16 automated hygiene & copilot unit tests
+│   └── api.test.ts                         # 20 edge API, security, CSRF & D1 tests
 ├── LOOM_SCRIPT.md                          # 4m 30s timed video walkthrough script
 ├── SUBMISSION_NOTE.md                      # Half-page assessment submission note
 ├── wrangler.toml                           # Cloudflare Workers & D1 configuration

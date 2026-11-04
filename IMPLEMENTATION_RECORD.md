@@ -5,7 +5,7 @@
 **Worker Subdomain URL:** [https://biai-corporate-pipeline.ludobase.workers.dev](https://biai-corporate-pipeline.ludobase.workers.dev)  
 **Primary GitHub Repository:** [https://github.com/mrongSubho/biai-corporate-pipeline.git](https://github.com/mrongSubho/biai-corporate-pipeline.git)  
 **Specification Documents:** [`PLAN_TASK2_CORPORATE_PIPELINE.md`](file:///Users/mrongsubho/Documents/Termninal/BIAI/PLAN_TASK2_CORPORATE_PIPELINE.md), [`DESIGN_SYSTEM_PLAN.md`](file:///Users/mrongsubho/Documents/Termninal/BIAI/DESIGN_SYSTEM_PLAN.md) & [`UI_UX_FIRST_CLASS_PLAN.md`](file:///Users/mrongsubho/Documents/Termninal/BIAI/UI_UX_FIRST_CLASS_PLAN.md)  
-**Current Git Head Commit:** `f598455` (`feat(pipeline): account management control plane and internal command messaging system`)  
+**Current Git Head Commit:** `044a731` (`fix: align lead entities, proposal variance metrics, and policy barriers with sample dataset`)  
 **Test Suite Verification:** Vitest 3.2.7 — **36 / 36 Tests Passing (100%)**  
 **Status:** 100% Implemented, Hardened, Reconciled & Pushed to GitHub  
 **Date:** November 2026
@@ -16,7 +16,7 @@
 
 The **BIAI Corporate Leads Pipeline** is a specialized B2B sales management and financial data hygiene workstation designed for the enterprise partnership division of the **Bangladesh Institute of AI (BIAI)**. It ingests, audits, remediates, and manages high-value corporate training contracts with major commercial banks, RMG textile conglomerates, pharmaceutical multinationals, and fintech companies in Bangladesh.
 
-The system addresses the primary failure modes of enterprise sales operations: duplicate pipeline imports, chronological date order inversions, payment reconciliation anomalies, and policy barriers. It replaces rigid multi-column Kanban boards with a **Linear-grade 3-pane desktop workspace** featuring explicit dataset lineage (`Cleaned Verified` vs `Raw Imported`), interactive 1-click hygiene remediation, viewport-contained inner scroll architecture, streamlined one-lined urgency indicators, a 4-tier hierarchical security and account control plane, and an internal command messaging system with operational directive tracking.
+The system addresses the primary failure modes of enterprise sales operations: duplicate pipeline imports, chronological date order inversions, payment reconciliation anomalies, and policy barriers. It replaces rigid multi-column Kanban boards with a **Linear-grade 3-pane desktop workspace** featuring explicit dataset lineage (`Cleaned Verified` vs `Raw Imported`), interactive 1-click hygiene remediation, viewport-contained inner scroll architecture, streamlined one-lined urgency indicators, a 4-tier hierarchical security and account control plane, an internal command messaging system with operational directive tracking, a Priority Chase triage view, Data Health Studio table, Safe AST Deal Copilot, and policy-guarded follow-up drafting.
 
 ### Verified Production Artifacts
 
@@ -25,7 +25,7 @@ The system addresses the primary failure modes of enterprise sales operations: d
 | **Custom Domain** | `https://biaileads.mrong.tech` | **Live (HTTP/2 200, Edge SSL active, Global Anycast)** |
 | **Worker Subdomain** | `https://biai-corporate-pipeline.ludobase.workers.dev` | **Live (Worker Version: `65dafd6c-7f72-4d26-aa9a-ff7d86f91cb6`)** |
 | **Cloudflare D1 Database** | `biai-pipeline-db` (`fa66524f-3670-4634-af64-861122a5fcad`) | **APAC Region (Singapore), Migrations 0001–0006 Applied & Seeded** |
-| **GitHub Repository** | `https://github.com/mrongSubho/biai-corporate-pipeline.git` | **Clean, Synchronized on `main` at commit `f598455`** |
+| **GitHub Repository** | `https://github.com/mrongSubho/biai-corporate-pipeline.git` | **Clean, Synchronized on `main` at commit `044a731`** |
 | **Test Suite** | Vitest 3.2.7 | **36 / 36 Tests Passing (16 Pipeline Engine + 20 API / D1 / Auth / Messaging)** |
 | **Financial Integrity** | 100% Mathematically Reconciled | **৳ 3.17M Cleaned vs ৳ 4.22M Raw (৳ 1.05M duplicate variance isolated)** |
 | **Security & Identity** | Tier-based RBAC & SHA-256 Sessions | **Active (Tier 0–3, CSRF Double-Submit, PBKDF2-SHA256, Anti-Escalation)** |
@@ -418,4 +418,26 @@ server: cloudflare
 - **Real-Time Search Filter**: Instant client-side search across message subjects, bodies, and sender identities.
 - **Auto-Scrolling Stream**: Chat log smoothly anchors to the newest transmissions upon receipt.
 - **Slide-Over Directive Drawer**: Operational directives can be composed and dispatched with targeted priority and acknowledgment requirements from a contextual side drawer.
+
+---
+
+## 13. Data Health Studio, Priority Chase & Safe AST Copilot
+
+### 13.1 Dedicated Data Health Studio Table
+- **Tabular Hygiene Inspection**: Full-table view surfacing all 21 hygiene anomalies with categorical severity filters (`Duplicate`, `Chronology`, `Contact Missing`, `Email Typo`, `Payment Discrepancy`, `Overdue`).
+- **1-Click Inline Remediation**: Direct action triggers for `Merge Duplicate`, `Swap Dates`, `Fix Email Typo`, and `Reconcile Advance Payment` without navigating away from the audit ledger.
+
+### 13.2 Priority Chase Triage View
+- **High-Velocity Pipeline Focus**: A dedicated operational view that isolates enterprise accounts requiring urgent intervention:
+  - Overdue follow-ups past the November 1, 2026 benchmark.
+  - High-value proposals awaiting C-suite signature.
+  - Leads with actionable anomalies blocking deal progression.
+
+### 13.3 Safe AST Copilot Interactive Studio
+- **Dual-Truth Variance Analysis**: Interactive natural language query studio that translates sales queries into an Abstract Syntax Tree (AST).
+- **Zero SQL Injection**: Validates all queries against strict allowlisted attributes, returning instant side-by-side revenue sums across Cleaned (`৳ 3.17M`) versus Raw (`৳ 4.22M`) datasets.
+
+### 13.4 Policy Barrier & Follow-Up Email Guardrails
+- **DO_NOT_CONTACT Enforcement**: Detects international vendor selections (e.g. `L16`) and locks outbound communication with a strict policy banner.
+- **Bank Verification Warning**: Flags wire transfer claims requiring formal bank slip confirmation (e.g. `L22`) before contracts advance to `Paid`.
 
