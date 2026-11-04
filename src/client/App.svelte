@@ -218,9 +218,24 @@
     viewMode === 'cleaned' ? leads.filter(l => !l.is_archived) : leads
   );
 
+  let overdueLeads = $derived(
+    displayLeads.filter(l => l.next_followup && l.next_followup < BENCHMARK_DATE && l.stage !== 'Lost' && l.stage !== 'Paid')
+  );
+
+  let hygieneLeads = $derived(
+    displayLeads.filter(l => auditResult.leadsWithFindings.has(l.id))
+  );
+
+  // Active view stream determined by sidebar view selection
+  let tabLeads = $derived.by(() => {
+    if (activeTab === 'priority') return overdueLeads;
+    if (activeTab === 'health') return hygieneLeads;
+    return displayLeads;
+  });
+
   // Filtered Leads by Search Query
   let filteredLeads = $derived(
-    displayLeads.filter(l => {
+    tabLeads.filter(l => {
       if (!searchQuery.trim()) return true;
       const q = searchQuery.toLowerCase();
       return (
@@ -234,10 +249,11 @@
     })
   );
 
-  // Selected Lead (Guaranteed selection)
+  // Selected Lead (Guaranteed selection in current view)
   let selectedLead = $derived(
+    filteredLeads.find(l => l.id === selectedLeadId) ||
     displayLeads.find(l => l.id === selectedLeadId) ||
-    leads.find(l => l.id === selectedLeadId) ||
+    filteredLeads[0] ||
     displayLeads[0]
   );
 
@@ -265,10 +281,6 @@
     displayLeads
       .filter(l => ['New', 'Contacted', 'Meeting', 'Proposal'].includes(l.stage))
       .reduce((s, l) => s + (l.deal_value_bdt || 0), 0)
-  );
-
-  let overdueLeads = $derived(
-    displayLeads.filter(l => l.next_followup && l.next_followup < BENCHMARK_DATE && l.stage !== 'Lost' && l.stage !== 'Paid')
   );
 
   const activeStages: PipelineStage[] = ['New', 'Contacted', 'Meeting', 'Proposal', 'Invoice sent'];
@@ -447,6 +459,24 @@
         soundFx.playEmergencyAlert();
       } else if (daysOverdue === 1 || lead.next_followup === BENCHMARK_DATE) {
         soundFx.playWarningPing();
+      }
+    }
+  }
+
+  function switchTab(tab: 'pipeline' | 'health' | 'priority' | 'copilot') {
+    activeTab = tab;
+    if (tab === 'health') {
+      layoutMode = 'table';
+      if (hygieneLeads.length > 0 && (!selectedLead || !hygieneLeads.some(l => l.id === selectedLead.id))) {
+        selectedLeadId = hygieneLeads[0].id;
+      }
+    } else if (tab === 'priority') {
+      if (overdueLeads.length > 0 && (!selectedLead || !overdueLeads.some(l => l.id === selectedLead.id))) {
+        selectedLeadId = overdueLeads[0].id;
+      }
+    } else if (tab === 'copilot') {
+      if (!copilotResult) {
+        runCopilot(copilotQuestion);
       }
     }
   }
@@ -921,7 +951,7 @@
           <nav class="space-y-0.5 text-xs">
             <button
               type="button"
-              onclick={() => activeTab = 'pipeline'}
+              onclick={() => switchTab('pipeline')}
               class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeTab === 'pipeline' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
               <div class="flex items-center gap-2">
                 <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
@@ -932,18 +962,18 @@
 
             <button
               type="button"
-              onclick={() => activeTab = 'health'}
+              onclick={() => switchTab('health')}
               class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeTab === 'health' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
               <div class="flex items-center gap-2">
                 <span class="w-2 h-2 rounded-full bg-amber-500"></span>
                 <span>Data Health Studio</span>
               </div>
-              <span class="font-mono tabular-nums text-[11px] text-amber-700 font-bold">18</span>
+              <span class="font-mono tabular-nums text-[11px] text-amber-700 font-bold">{auditResult.totalFindingsCount}</span>
             </button>
 
             <button
               type="button"
-              onclick={() => activeTab = 'priority'}
+              onclick={() => switchTab('priority')}
               class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeTab === 'priority' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
               <div class="flex items-center gap-2">
                 <span class="w-2 h-2 rounded-full bg-rose-500"></span>
@@ -954,13 +984,13 @@
 
             <button
               type="button"
-              onclick={() => activeTab = 'copilot'}
+              onclick={() => switchTab('copilot')}
               class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeTab === 'copilot' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
               <div class="flex items-center gap-2">
                 <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
                 <span>Safe AST Copilot</span>
               </div>
-              <span class="font-mono text-[10px] text-indigo-500">AI</span>
+              <span class="font-mono text-[10px] text-indigo-500 font-semibold">AI</span>
             </button>
           </nav>
         </div>
@@ -1024,25 +1054,25 @@
             <nav class="space-y-1 text-xs">
               <button
                 type="button"
-                onclick={() => { activeTab = 'pipeline'; mobileNavOpen = false; }}
+                onclick={() => { switchTab('pipeline'); mobileNavOpen = false; }}
                 class={`w-full text-left px-3 py-2 rounded-lg font-medium ${activeTab === 'pipeline' ? 'bg-orange-600 text-white font-semibold' : 'text-slate-700 dark:text-slate-300'}`}>
-                Active Pipeline
+                Active Pipeline ({displayLeads.length})
               </button>
               <button
                 type="button"
-                onclick={() => { activeTab = 'health'; mobileNavOpen = false; }}
+                onclick={() => { switchTab('health'); mobileNavOpen = false; }}
                 class={`w-full text-left px-3 py-2 rounded-lg font-medium ${activeTab === 'health' ? 'bg-orange-600 text-white font-semibold' : 'text-slate-700 dark:text-slate-300'}`}>
-                Data Health Studio
+                Data Health Studio ({auditResult.totalFindingsCount})
               </button>
               <button
                 type="button"
-                onclick={() => { activeTab = 'priority'; mobileNavOpen = false; }}
+                onclick={() => { switchTab('priority'); mobileNavOpen = false; }}
                 class={`w-full text-left px-3 py-2 rounded-lg font-medium ${activeTab === 'priority' ? 'bg-orange-600 text-white font-semibold' : 'text-slate-700 dark:text-slate-300'}`}>
-                Priority Chase
+                Priority Chase ({overdueLeads.length})
               </button>
               <button
                 type="button"
-                onclick={() => { activeTab = 'copilot'; mobileNavOpen = false; }}
+                onclick={() => { switchTab('copilot'); mobileNavOpen = false; }}
                 class={`w-full text-left px-3 py-2 rounded-lg font-medium ${activeTab === 'copilot' ? 'bg-orange-600 text-white font-semibold' : 'text-slate-700 dark:text-slate-300'}`}>
                 Safe AST Copilot
               </button>
@@ -1075,29 +1105,174 @@
       <div class="h-10 border-b border-warm-200 dark:border-slate-800 px-4 flex items-center justify-between bg-white dark:bg-slate-900 text-xs shrink-0">
         <div class="flex items-center gap-3">
           <span class="font-semibold text-slate-800 dark:text-slate-200">
-            {activeTab === 'pipeline' ? 'Corporate Pipeline Workspace' : activeTab === 'health' ? 'Data Hygiene & Audit Studio' : activeTab === 'priority' ? 'Priority Overdue Chase' : 'AST Query Engine'}
+            {activeTab === 'pipeline' ? 'Corporate Pipeline Workspace' : activeTab === 'health' ? 'Data Hygiene & Audit Studio' : activeTab === 'priority' ? 'Priority Overdue Chase' : 'Safe AST Copilot Engine'}
           </span>
-          <span class="text-[11px] text-slate-400 tabular-nums">({filteredLeads.length} leads in view)</span>
+          <span class="text-[11px] text-slate-400 tabular-nums">
+            {#if activeTab === 'priority'}
+              ({filteredLeads.length} overdue {filteredLeads.length === 1 ? 'deal' : 'deals'} requiring immediate chase)
+            {:else if activeTab === 'health'}
+              ({filteredLeads.length} leads with findings · {auditResult.totalFindingsCount} anomalies)
+            {:else if activeTab === 'copilot'}
+              (AST Query Interface)
+            {:else}
+              ({filteredLeads.length} leads in view)
+            {/if}
+          </span>
         </div>
 
         <!-- Board vs Table Toggle -->
-        <div class="flex items-center gap-1 bg-warm-100 dark:bg-slate-800 p-0.5 rounded-md text-[11px]">
-          <button
-            onclick={() => layoutMode = 'board'}
-            class={`px-2 py-0.5 rounded font-medium transition ${layoutMode === 'board' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
-            Active Stages Board
-          </button>
-          <button
-            onclick={() => layoutMode = 'table'}
-            class={`px-2 py-0.5 rounded font-medium transition ${layoutMode === 'table' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
-            Data Health Table
-          </button>
-        </div>
+        {#if activeTab !== 'copilot'}
+          <div class="flex items-center gap-1 bg-warm-100 dark:bg-slate-800 p-0.5 rounded-md text-[11px]">
+            <button
+              onclick={() => layoutMode = 'board'}
+              class={`px-2 py-0.5 rounded font-medium transition ${layoutMode === 'board' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+              Active Stages Board
+            </button>
+            <button
+              onclick={() => layoutMode = 'table'}
+              class={`px-2 py-0.5 rounded font-medium transition ${layoutMode === 'table' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+              Data Health Table
+            </button>
+          </div>
+        {/if}
       </div>
 
-      <!-- Main Surface: Board or Table (FIT IN VIEWPORT, ZERO BOARD SCROLL) -->
+      <!-- Main Surface: Board, Table or Copilot Studio (FIT IN VIEWPORT, ZERO BOARD SCROLL) -->
       <div class="flex-1 min-h-0 overflow-hidden">
-        {#if layoutMode === 'board'}
+        {#if activeTab === 'copilot'}
+          <!-- SAFE AST COPILOT INTERACTION STUDIO -->
+          <div class="h-full flex flex-col min-h-0 p-4 gap-4 overflow-y-auto overscroll-contain">
+            <!-- Query Bar & Engine Header -->
+            <div class="bg-white dark:bg-slate-900 border border-warm-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs space-y-3 shrink-0">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                    <Icon name="sparkles" size={16} />
+                  </span>
+                  <div>
+                    <h3 class="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">Safe Deterministic AST Copilot</h3>
+                    <p class="text-[11px] text-slate-500 dark:text-slate-400">Zero LLM hallucinations · Strict mathematical aggregation & dual-truth reconciliation</p>
+                  </div>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                  AST Verified
+                </span>
+              </div>
+
+              <!-- Input Bar -->
+              <form onsubmit={(e) => { e.preventDefault(); runCopilot(copilotQuestion); }} class="flex gap-2">
+                <div class="relative flex-1">
+                  <span class="absolute left-3 top-2.5 text-slate-400">
+                    <Icon name="search" size={14} />
+                  </span>
+                  <input
+                    type="text"
+                    bind:value={copilotQuestion}
+                    placeholder="Ask AST query e.g. What is the total value in Proposal stage?"
+                    class="w-full bg-warm-50 dark:bg-slate-950 text-slate-900 dark:text-white border border-warm-200 dark:border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs focus:ring-1 focus:ring-orange-500 font-sans" />
+                </div>
+                <button
+                  type="submit"
+                  class="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-xs font-semibold shadow-xs transition flex items-center gap-1.5 shrink-0">
+                  <span>Execute AST</span>
+                </button>
+              </form>
+
+              <!-- Quick Query Preset Chips -->
+              <div class="flex flex-wrap items-center gap-1.5 pt-1">
+                <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mr-1">Presets:</span>
+                {#each [
+                  'What is the total value in Proposal stage?',
+                  'Which deals are overdue?',
+                  'Show me all garment and pharma leads',
+                  'Show all data errors and duplicates',
+                  'What is the total pipeline value?'
+                ] as preset}
+                  <button
+                    type="button"
+                    onclick={() => runCopilot(preset)}
+                    class="text-[11px] px-2.5 py-1 rounded-lg bg-warm-100 dark:bg-slate-800 hover:bg-orange-50 hover:text-orange-700 dark:hover:bg-slate-750 text-slate-600 dark:text-slate-300 border border-warm-200 dark:border-slate-700 transition">
+                    {preset}
+                  </button>
+                {/each}
+              </div>
+            </div>
+
+            <!-- Copilot Query Execution Result -->
+            {#if copilotResult}
+              <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 shrink-0">
+                <!-- Result Metric Card -->
+                <div class="bg-white dark:bg-slate-900 border border-warm-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs space-y-2">
+                  <span class="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-bold">Computed Result</span>
+                  {#if copilotResult.cleaned_result.scalar !== undefined}
+                    <div class="text-2xl font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                      ৳ {Number(copilotResult.cleaned_result.scalar).toLocaleString()} BDT
+                    </div>
+                  {:else}
+                    <div class="text-2xl font-mono font-bold text-slate-900 dark:text-white">
+                      {copilotResult.cleaned_result.leads.length} <span class="text-xs font-sans text-slate-500">records</span>
+                    </div>
+                  {/if}
+                  <p class="text-xs text-slate-600 dark:text-slate-400">
+                    Intent: <span class="font-mono font-semibold text-orange-600 dark:text-orange-400">{copilotResult.interpreted_intent}</span>
+                  </p>
+                </div>
+
+                <!-- Dual Truth Variance Card (if any) -->
+                {#if copilotResult.raw_variance}
+                  <div class="bg-white dark:bg-slate-900 border border-warm-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs space-y-2">
+                    <span class="text-[10px] font-mono uppercase tracking-wider text-amber-600 dark:text-amber-400 font-bold">Dual-Truth Variance</span>
+                    <div class="text-xs space-y-1">
+                      <div class="text-slate-600 dark:text-slate-400">Raw Uncleaned: <span class="font-mono font-bold text-slate-900 dark:text-white">৳ {Number(copilotResult.raw_variance.raw_scalar).toLocaleString()} BDT</span></div>
+                      <div class="text-emerald-600 dark:text-emerald-400">Cleaned Verified: <span class="font-mono font-bold">৳ {Number(copilotResult.cleaned_result.scalar).toLocaleString()} BDT</span></div>
+                      <div class="text-[11px] text-rose-600 dark:text-rose-400 font-medium pt-1">
+                        -৳ {copilotResult.raw_variance.phantom_value_removed_bdt.toLocaleString()} phantom duplicate excluded
+                      </div>
+                    </div>
+                  </div>
+                {/if}
+
+                <!-- AST Syntax Structure Card -->
+                <div class="bg-white dark:bg-slate-900 border border-warm-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs space-y-2 lg:col-span-1">
+                  <span class="text-[10px] font-mono uppercase tracking-wider text-indigo-600 dark:text-indigo-400 font-bold">Deterministic AST Grammar</span>
+                  <pre class="bg-warm-50 dark:bg-slate-950 p-2 rounded-lg text-[10px] font-mono text-slate-700 dark:text-slate-300 overflow-x-auto max-h-24">{JSON.stringify(copilotResult.ast, null, 2)}</pre>
+                </div>
+              </div>
+
+              <!-- Matching Result Leads List -->
+              {#if copilotResult.cleaned_result.leads && copilotResult.cleaned_result.leads.length > 0}
+                <div class="bg-white dark:bg-slate-900 border border-warm-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex-1 flex flex-col min-h-0">
+                  <div class="flex items-center justify-between pb-3 border-b border-warm-100 dark:border-slate-800">
+                    <span class="font-bold text-xs text-slate-900 dark:text-white">Query Output Records ({copilotResult.cleaned_result.leads.length} leads)</span>
+                    <span class="text-[11px] text-slate-400 font-mono">Click record to inspect in dossier</span>
+                  </div>
+                  <div class="divide-y divide-warm-100 dark:divide-slate-800 overflow-y-auto max-h-80">
+                    {#each copilotResult.cleaned_result.leads as lead}
+                      <div
+                        tabindex="0"
+                        role="button"
+                        onclick={() => selectLead(lead.id)}
+                        onkeydown={(e) => { if (e.key === 'Enter') selectLead(lead.id); }}
+                        class={`py-2 px-3 flex items-center justify-between hover:bg-warm-50 dark:hover:bg-slate-850 cursor-pointer rounded-lg transition ${selectedLeadId === lead.id ? 'bg-orange-50/70 dark:bg-orange-950/20' : ''}`}>
+                        <div class="flex items-center gap-3">
+                          <span class="font-mono font-bold text-orange-700 dark:text-orange-400 text-xs">{lead.id}</span>
+                          <div>
+                            <div class="font-semibold text-xs text-slate-900 dark:text-white">{lead.company}</div>
+                            <div class="text-[10px] text-slate-400">{lead.contact_name || 'Missing contact'} · {lead.industry}</div>
+                          </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                          <span class="px-2 py-0.5 rounded text-[10px] bg-warm-100 dark:bg-slate-800 font-medium text-slate-600 dark:text-slate-300">{lead.stage}</span>
+                          <span class="font-mono font-bold text-xs text-emerald-600 dark:text-emerald-400">৳ {(lead.deal_value_bdt || 0).toLocaleString()}</span>
+                        </div>
+                      </div>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+            {/if}
+          </div>
+        {:else if layoutMode === 'board'}
           <!-- 4-COLUMN ACTIVE STAGE WORKSPACE (BOARD DOES NOT SCROLL, INNER COLUMNS SCROLL) -->
           <div class="h-full flex flex-col min-h-0 p-3.5 gap-3 overflow-hidden">
             <!-- Columns Grid (Takes remaining height, columns scroll internally) -->
@@ -1124,7 +1299,13 @@
                   <div class="p-2 overflow-y-auto overscroll-contain space-y-2 flex-1 min-h-0">
                     {#if stageLeads.length === 0}
                       <div class="py-8 text-center text-slate-400 text-xs italic">
-                        No deals in {stage}
+                        {#if activeTab === 'priority'}
+                          No overdue deals in {stage}
+                        {:else if activeTab === 'health'}
+                          No data findings in {stage}
+                        {:else}
+                          No deals in {stage}
+                        {/if}
                       </div>
                     {:else}
                       {#each stageLeads as lead (lead.id)}
