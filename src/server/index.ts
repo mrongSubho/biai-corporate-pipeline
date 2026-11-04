@@ -493,6 +493,21 @@ app.post('/api/admin/users/:id/revoke-sessions', requireTier('TIER_1'), async (c
   return c.json(result.data, 200);
 });
 
+// DELETE /api/admin/users/:id: Decommission & deactivate user account
+app.delete('/api/admin/users/:id', requireTier('TIER_1'), async (c) => {
+  const targetId = c.req.param('id');
+  const actor = c.get('actor');
+  const body = await c.req.json().catch(() => ({}));
+  const reason = body?.reason;
+
+  const authService = new AuthService(c.env?.DB, c.env, 'PIPELINE');
+  const result = await authService.deleteUser(actor, targetId, reason);
+  if (!result.success) {
+    return c.json({ error: result.error, code: result.code }, result.status as any);
+  }
+  return c.json(result.data, 200);
+});
+
 // GET /api/admin/audit-logs: Comprehensive security audit stream
 app.get('/api/admin/audit-logs', requireTier('TIER_1'), async (c) => {
   const actor = c.get('actor');

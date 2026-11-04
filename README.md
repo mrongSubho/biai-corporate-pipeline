@@ -24,7 +24,7 @@ Deployed on **Cloudflare Workers (Edge V8 Isolates) + Cloudflare D1 (Distributed
    - **Chronological Date Order Inversion (L25 Sylhet Hospitality Group):** Detects `next_followup` (Oct 21) set earlier than `last_contact` (Oct 28). Provides audited field swap or auto-reschedule.
    - **Payment & Accounting Semantics (L12 Eastern Cable Industries):** Corrects "Paid" status to reflect 50% advance (৳150,000 collected, ৳150,000 outstanding).
    - **Domain Typo Normalization (L18 Bogura Textile Mills):** Normalizes `bogurateXtile.com` to prevent silent delivery bounce.
-   - **Incomplete Enterprise Records:** Highlights missing contact person on `L24` (Square Pharmaceuticals) and missing phone number on `L06` (Akij Group).
+   - **Incomplete Enterprise Records:** Highlights missing contact person on `L24` (Noakhali Agro Mart) and missing phone number on `L06` (Sylhet Tea Traders).
    - **Overdue Deal Tracking:** Flags **9 overdue accounts** strictly before Benchmark Date (`2026-11-01`), plus **1 due today** (`L09 Apex Footwear`).
 
 4. **Safe Natural Language Deal Copilot (Allowlisted AST):**

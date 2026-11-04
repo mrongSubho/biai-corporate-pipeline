@@ -1243,6 +1243,68 @@ export class AuthService {
   }
 
   /**
+   * Delete / Decommission Operator with Tier Guard Rails
+   */
+  async deleteUser(actor: AuthenticatedUser, targetUserId: string, reason?: string): Promise<AuthServiceResponse> {
+    if (!this.db) return { success: false, status: 503, error: 'Database service unavailable' };
+
+    if (actor.id === targetUserId) {
+      return { success: false, status: 400, error: 'Self-deletion is prohibited for platform security', code: 'CANNOT_DELETE_SELF' };
+    }
+
+    const target = await this.db.prepare('SELECT * FROM users WHERE id = ?').bind(targetUserId).first();
+    if (!target) return { success: false, status: 404, error: 'User not found', code: 'USER_NOT_FOUND' };
+
+    // Anti-lockout: verify target is not sole TIER_0 Platform Owner
+    if (target.security_tier === 'TIER_0') {
+      const ownerCount = await this.db.prepare("SELECT COUNT(*) as count FROM users WHERE security_tier = 'TIER_0' AND status = 'ACTIVE'").first();
+      if ((ownerCount?.count || 0) <= 1) {
+        return { success: false, status: 400, error: 'Cannot remove the sole Platform Owner. Designate another Tier 0 owner first.', code: 'LAST_OWNER_PROTECTION' };
+      }
+    }
+
+    const check = canManageTarget(actor, { id: target.id, security_tier: target.security_tier, role: normalizeStoredRole(target.role) });
+    if (!check.allowed) {
+      return { success: false, status: 403, error: check.reason || 'Insufficient tier authority to remove this user', code: 'INSUFFICIENT_TIER_AUTHORITY' };
+    }
+
+    await this.db.batch([
+      this.db.prepare(`
+        UPDATE users SET
+          status = 'DEACTIVATED',
+          suspended_reason = ?,
+          suspended_by = ?,
+          updated_at = datetime('now')
+        WHERE id = ?
+      `).bind(reason || 'Operator decommissioned by administrator', actor.id, targetUserId),
+      this.db.prepare(`
+        UPDATE auth_sessions
+        SET revoked_at = datetime('now'), revoke_reason = 'USER_DECOMMISSIONED'
+        WHERE user_id = ? AND revoked_at IS NULL
+      `).bind(targetUserId),
+      this.db.prepare(`
+        DELETE FROM user_app_scopes WHERE user_id = ?
+      `).bind(targetUserId)
+    ]);
+
+    await logAuthEvent(this.db, {
+      workspaceId: actor.workspace_id,
+      actorUserId: actor.id,
+      subjectUserId: targetUserId,
+      eventType: 'USER_DELETED',
+      outcome: 'SUCCESS',
+      reasonCode: reason || 'ADMIN_DECOMMISSION',
+      metadata: { deletedUserName: target.full_name, deletedUserEmail: target.email, deletedTier: target.security_tier }
+    });
+
+    return {
+      success: true,
+      status: 200,
+      data: { message: `Operator ${target.full_name} (${target.email}) decommissioned and deactivated.` }
+    };
+  }
+
+  /**
    * Workspace Security Audit Trail
    */
   async getAuditLogs(
@@ -1255,8 +1317,8 @@ export class AuthService {
       SELECT
         e.id, e.workspace_id, e.event_type, e.outcome, e.reason_code,
         e.ip_hash, e.metadata_json, e.created_at,
-        u_act.full_name as actor_name, u_act.email as actor_email, u_act.role as actor_role,
-        u_sub.full_name as subject_name, u_sub.email as subject_email, u_sub.role as subject_role
+        u_act.full_name as actor_name, u_act.email as actor_email, u_act.role as actor_role, u_act.security_tier as actor_tier,
+        u_sub.full_name as subject_name, u_sub.email as subject_email, u_sub.role as subject_role, u_sub.security_tier as subject_tier
       FROM auth_events e
       LEFT JOIN users u_act ON e.actor_user_id = u_act.id
       LEFT JOIN users u_sub ON e.subject_user_id = u_sub.id

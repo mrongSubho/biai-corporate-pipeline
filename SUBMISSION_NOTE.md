@@ -4,7 +4,7 @@
 **Submission Date:** 2 November 2026  
 **Live Production URL (Cloudflare Edge):** `https://biaileads.mrong.tech`  
 **CRM Triage Workspace:** `https://biaicrm.mrong.tech`  
-**Code Repository:** `https://github.com/mrongSubho/biai-corporate-pipeline`  
+**Code Repository:** `https://github.com/mrongSubho/biai-crm` *(Directory: `apps/task2-pipeline`)*  
 **Loom Walkthrough (4 min 30s):** `[Loom Video URL]`
 
 ---
@@ -20,7 +20,7 @@ I engineered a production-grade, edge-native **Corporate B2B Leads Pipeline & Da
   - **Chronological Causality Inversion (L25 Sylhet Hospitality):** Detects that `next_followup` (Oct 21) was set earlier than `last_contact` (Oct 28). Provides audited remediation (field swap 21 Oct ⟷ 28 Oct or auto-reschedule to Nov 4).
   - **Payment & Accounting Semantics (L12 Eastern Cable):** Detects that L12 is marked "Paid" for ৳300k, yet notes confirm only a 50% advance. Corrects the financial model to reflect ৳150,000 collected and ৳150,000 still due.
   - **Email Domain Typo Normalization (L18 Bogura Textile):** Flags and fixes `bogurateXtile.com` to prevent silent delivery bounce.
-  - **Identity & Contact Completeness:** Flags missing contact person on `L24` (Square Pharmaceuticals enterprise account) and missing phone number on `L06` (Akij Group).
+  - **Identity & Contact Completeness:** Flags missing contact person on `L24` (Noakhali Agro Mart website lead) and missing phone number on `L06` (Sylhet Tea Traders).
   - **Overdue Follow-up Monitor:** Tracks exactly **9 overdue accounts** strictly before the Benchmark Date (`2026-11-01`), plus **1 due today** (`L09`), preventing deal slippage.
 - **Safe Natural Language Deal Copilot (AST Compiler):** Solves the critical security vulnerability of direct NL-to-SQL by compiling natural language queries into a strictly typed, allowlisted Abstract Syntax Tree (AST). Rejects arbitrary SQL execution, enforces workspace boundaries, and computes dual-truth variance (e.g. comparing raw vs. cleaned proposal totals).
 - **Context-Aware AI Email Drafter with Policy Barriers:** Generates grounded B2B follow-ups (Polite Check-in, Proposal Value Proposition, Invoice Reminder) while enforcing strict operational safety barriers:
@@ -47,4 +47,4 @@ I engineered a production-grade, edge-native **Corporate B2B Leads Pipeline & Da
 ### 4. What I Would Fix / Build Next
 1. **Live Transactional Email Gateway:** Integrate Resend or Cloudflare Email Workers with open/click tracking and automated follow-up cadences.
 2. **ERP & Accounting Webhooks:** Connect corporate bank statement ingestion (e.g. City Bank, BRAC Bank API) to auto-reconcile wire transfers and mark payments as cleared without manual intervention.
-3. **LinkedIn & Corporate Registry Scraping:** Automatically enrich incomplete enterprise leads (such as missing contact on L24 Square Pharma) via Apollo.io or LinkedIn Sales Navigator APIs.
+3. **LinkedIn & Corporate Registry Scraping:** Automatically enrich incomplete enterprise leads (such as missing contact on L24 Noakhali Agro Mart) via Apollo.io or LinkedIn Sales Navigator APIs.

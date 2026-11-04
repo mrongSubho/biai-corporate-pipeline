@@ -54,8 +54,8 @@
 > 
 > 1. **Chronological Causality Inversion on L25 (Sylhet Hospitality Group):** Look at this error—its `last_contact` is October 28, but its `next_followup` was recorded as October 21. A follow-up cannot happen before the call occurred. Instead of blindly guessing, our engine gives reps two audited remediation paths: swap the transposed fields (21 Oct ⟷ 28 Oct) or reschedule to November 4.
 > 2. **Payment Semantics on L12 (Eastern Cable Industries):** Marked as 'Paid' for ৳300,000, yet the source notes prove only a 50% advance was received. Our system correctly splits this into ৳150k collected and ৳150k due.
-> 3. **Data Quality & Incomplete Records:** It flags `L18` for a domain typo (`bogurateXtile.com`), `L24` Square Pharmaceuticals for a missing contact name, and `L06` Akij Group for a missing phone number.
-> 4. **Overdue Follow-ups:** It immediately highlights the **9 overdue accounts** strictly before November 1, plus **L09 (Apex Footwear)** which is due today, so reps never drop a high-intent conversation."
+> 3. **Data Quality & Incomplete Records:** It flags `L18` for a domain typo (`bogurateXtile.com`), `L24` Noakhali Agro Mart for a missing contact name, and `L06` Sylhet Tea Traders for a missing phone number.
+> 4. **Overdue Follow-ups:** It immediately highlights the **9 overdue accounts** strictly before November 1, plus **L09 (Rangpur Agro Feeds)** which is due today, so reps never drop a high-intent conversation."
 
 ---
 
@@ -70,7 +70,7 @@
 > 
 > Notice how the Copilot answers:
 > When I ask *'What is the total value in Proposal stage?'*, it doesn't just return a number—it provides **Dual-Truth Reconciliation**:
-> It shows that the **Cleaned pipeline has ৳1,150,000** (2 accounts: Beximco and Summit), while warning that the **Raw pipeline showed ৳1,500,000** because of the duplicate Padma Textiles lead. That transparency builds executive trust."
+> It shows that the **Cleaned pipeline has ৳920,000** (2 accounts: Meghna Pharma Ltd and Barishal Dairy Co), while warning that the **Raw pipeline showed ৳1,620,000** because of the duplicate Meghna Pharmaceuticals lead (৳700,000 phantom pipeline removed). That transparency builds executive trust."
 
 ---
 
@@ -81,7 +81,7 @@
 > 
 > Sales reps waste hours drafting B2B follow-ups, but naive AI tools can cause catastrophic PR mistakes. Our engine embeds **hard business policy guardrails**:
 > 
-> - Look at **L16 (Sundarban Shipping)**: The notes say the CEO resigned and not to contact until mid-November. The engine actively enforces a **Hard DO_NOT_CONTACT Policy Barrier**, completely blocking outbound drafts to protect the relationship.
+> - Look at **L16 (Sundarban Shipping)**: The client chose an international vendor and explicitly noted not to contact again this year. The engine actively enforces a **Hard DO_NOT_CONTACT Policy Barrier**, completely blocking outbound drafts to protect client relationships.
 > - Look at **L22 (Khulna Jute Works)**: The client claims they made a wire transfer, but our finance team hasn’t seen it. The drafter injects a **Mandatory Bank Verification Check** before allowing an invoice reminder.
 > - For clean accounts like **L01 Padma Textiles**, it generates a grounded, context-aware proposal follow-up citing their exact deal terms and upcoming milestones.
 > 
