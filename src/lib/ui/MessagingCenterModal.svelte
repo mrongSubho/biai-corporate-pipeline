@@ -637,7 +637,7 @@
         {#if isCreatingThread}
           <div class="absolute inset-y-0 right-0 w-full sm:w-[460px] bg-white dark:bg-slate-900 border-l border-warm-200 dark:border-slate-800 shadow-2xl flex flex-col z-30 animate-in slide-in-from-right duration-200">
             <!-- Drawer Header -->
-            <div class="p-4 border-b border-warm-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-warm-50/50 dark:bg-slate-850">
+            <div class="p-4 border-b border-warm-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-warm-50/50 dark:bg-slate-950">
               <div class="flex items-center gap-2">
                 <Icon name="plus" size={16} class="text-orange-600 dark:text-orange-400" />
                 <h4 class="font-bold text-slate-900 dark:text-white text-sm">Compose Directive or Message</h4>
@@ -724,7 +724,7 @@
               </div>
 
               <!-- Directive Policy Settings -->
-              <div class="p-3.5 rounded-2xl border border-warm-200 dark:border-slate-700 bg-warm-50/70 dark:bg-slate-850 space-y-3">
+              <div class="p-3.5 rounded-2xl border border-warm-200 dark:border-slate-700 bg-warm-50/70 dark:bg-slate-950 space-y-3">
                 <label class="flex items-center gap-2.5 cursor-pointer select-none font-semibold text-slate-800 dark:text-slate-200">
                   <input type="checkbox" bind:checked={newRequiresAck} class="rounded text-orange-600 w-4 h-4 focus:ring-orange-500" />
                   <span>Mark as Operational Directive (1-Click Ack Required)</span>

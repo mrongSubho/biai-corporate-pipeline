@@ -82,7 +82,7 @@
 }
 
 .card-bg {
-  @apply bg-white dark:bg-slate-850 border border-warm-200 dark:border-slate-700/60 shadow-card transition-colors;
+  @apply bg-white dark:bg-slate-900 border border-warm-200 dark:border-slate-800 shadow-card transition-colors;
 }
 
 /* 3px Left Semantic Rails */

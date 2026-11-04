@@ -730,7 +730,7 @@
               {/if}
 
               <!-- Profile Details Card -->
-              <div class="bg-warm-50/70 dark:bg-slate-850/80 p-5 rounded-2xl border border-warm-200 dark:border-slate-800 space-y-4">
+              <div class="bg-warm-50/70 dark:bg-slate-950 p-5 rounded-2xl border border-warm-200 dark:border-slate-800 space-y-4">
                 <h4 class="font-bold text-slate-900 dark:text-white text-xs uppercase tracking-wider">Identity Details</h4>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
@@ -789,7 +789,7 @@
               </div>
 
               <!-- Permission Scopes Card -->
-              <div class="bg-warm-50/70 dark:bg-slate-850/80 p-5 rounded-2xl border border-warm-200 dark:border-slate-800 space-y-3">
+              <div class="bg-warm-50/70 dark:bg-slate-950 p-5 rounded-2xl border border-warm-200 dark:border-slate-800 space-y-3">
                 <div class="flex items-center justify-between">
                   <h4 class="font-bold text-slate-900 dark:text-white text-xs uppercase tracking-wider">Assigned Scope Capabilities</h4>
                   <span class="text-[10px] font-mono text-slate-500">{currentUser.scopes?.length || 0} Permissions Granted</span>
@@ -825,7 +825,7 @@
                 </div>
               {/if}
 
-              <div class="bg-warm-50/70 dark:bg-slate-850/80 p-6 rounded-2xl border border-warm-200 dark:border-slate-800 space-y-4">
+              <div class="bg-warm-50/70 dark:bg-slate-950 p-6 rounded-2xl border border-warm-200 dark:border-slate-800 space-y-4">
                 <div>
                   <h4 class="font-bold text-slate-900 dark:text-white text-sm">Change Operator Password</h4>
                   <p class="text-slate-500 text-xs mt-0.5">Changing your password invalidates your other edge sessions for protection.</p>
@@ -957,7 +957,7 @@
               {:else}
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {#each activeSessions as s}
-                    <div class="p-4 rounded-2xl border border-warm-200 dark:border-slate-800 bg-warm-50/50 dark:bg-slate-850 flex items-start gap-3">
+                    <div class="p-4 rounded-2xl border border-warm-200 dark:border-slate-800 bg-warm-50/50 dark:bg-slate-950 flex items-start gap-3">
                       <div class="p-2 rounded-xl bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-warm-200 dark:border-slate-700 shrink-0">
                         <Icon name={s.user_agent?.toLowerCase().includes('mobile') ? 'smartphone' : 'monitor'} size={18} />
                       </div>
@@ -1009,7 +1009,7 @@
                     <tbody class="divide-y divide-warm-100 dark:divide-slate-800 font-mono text-[11px]">
                       {#each personalActivity as act}
                         {@const metaItems = formatMetadata(act.metadata_json)}
-                        <tr class="hover:bg-warm-50/60 dark:hover:bg-slate-850/60 transition-colors">
+                        <tr class="hover:bg-warm-50/60 dark:hover:bg-slate-800 transition-colors">
                           <td class="p-3 font-sans font-medium text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                             <Icon name="activity" size={13} class="text-orange-500" />
                             <span>{act.event_type}</span>
@@ -1038,7 +1038,7 @@
           {#if activeNav === 'directory' && isElevated}
             <div class="space-y-4">
               <!-- Directory Action Strip -->
-              <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-warm-50/50 dark:bg-slate-850/60 p-3 rounded-2xl border border-warm-200 dark:border-slate-800">
+              <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-warm-50/50 dark:bg-slate-950 p-3 rounded-2xl border border-warm-200 dark:border-slate-800">
                 <!-- Search & Filters -->
                 <div class="flex items-center gap-2 flex-1 w-full sm:w-auto">
                   <div class="relative flex-1 max-w-xs">
@@ -1090,7 +1090,7 @@
                     <tbody class="divide-y divide-warm-100 dark:divide-slate-800">
                       {#each filteredUsers as u}
                         {@const canManage = canActorManage(u)}
-                        <tr class="hover:bg-warm-50/60 dark:hover:bg-slate-850/50 transition-colors">
+                        <tr class="hover:bg-warm-50/60 dark:hover:bg-slate-800 transition-colors">
                           <td class="p-3">
                             <div class="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
                               <span>{u.full_name}</span>
@@ -1172,7 +1172,7 @@
                   type="text"
                   placeholder="Filter by actor or event..."
                   bind:value={auditSearchQuery}
-                  class="w-full bg-warm-50 dark:bg-slate-850 text-slate-800 dark:text-slate-200 border border-warm-200 dark:border-slate-700 rounded-xl pl-9 pr-3 py-1.5 text-xs focus:ring-1 focus:ring-orange-500" />
+                  class="w-full bg-warm-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 border border-warm-200 dark:border-slate-700 rounded-xl pl-9 pr-3 py-1.5 text-xs focus:ring-1 focus:ring-orange-500" />
               </div>
 
               {#if isLoadingAuditLogs}
@@ -1197,7 +1197,7 @@
                     <tbody class="divide-y divide-warm-100 dark:divide-slate-800 font-mono text-[11px]">
                       {#each filteredAuditLogs as log}
                         {@const metaItems = formatMetadata(log.metadata_json)}
-                        <tr class="hover:bg-warm-50/60 dark:hover:bg-slate-850/60 transition-colors">
+                        <tr class="hover:bg-warm-50/60 dark:hover:bg-slate-800 transition-colors">
                           <td class="p-3 text-slate-500 whitespace-nowrap">{log.created_at?.slice(0, 19)}</td>
                           <td class="p-3 font-sans font-medium text-slate-800 dark:text-slate-200">{log.actor_id}</td>
                           <td class="p-3 font-semibold text-orange-600 dark:text-orange-400">{log.event_type}</td>
@@ -1226,7 +1226,7 @@
         {#if drawerMode}
           <div class="absolute inset-y-0 right-0 w-full sm:w-[420px] bg-white dark:bg-slate-900 border-l border-warm-200 dark:border-slate-800 shadow-2xl flex flex-col z-30 animate-in slide-in-from-right duration-200">
             <!-- Drawer Header -->
-            <div class="p-4 border-b border-warm-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-warm-50/50 dark:bg-slate-850">
+            <div class="p-4 border-b border-warm-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-warm-50/50 dark:bg-slate-950">
               <div class="flex items-center gap-2">
                 <Icon name={drawerMode === 'CREATE' ? 'user-plus' : 'sliders'} size={16} class="text-orange-600 dark:text-orange-400" />
                 <h4 class="font-bold text-slate-900 dark:text-white text-sm">
@@ -1314,7 +1314,7 @@
                 </div>
 
                 <!-- Password Generator Helper -->
-                <div class="p-3 rounded-2xl bg-warm-50 dark:bg-slate-850 border border-warm-200 dark:border-slate-700 space-y-2">
+                <div class="p-3 rounded-2xl bg-warm-50 dark:bg-slate-950 border border-warm-200 dark:border-slate-700 space-y-2">
                   <div class="flex items-center justify-between">
                     <label for="new-op-pass" class="font-medium text-slate-700 dark:text-slate-300">Initial Temporary Password</label>
                     <button
@@ -1357,7 +1357,7 @@
                 <!-- MANAGE FORM -->
                 
                 <!-- Section A: Role & Tier -->
-                <div class="p-3.5 rounded-2xl bg-warm-50 dark:bg-slate-850 border border-warm-200 dark:border-slate-700 space-y-3">
+                <div class="p-3.5 rounded-2xl bg-warm-50 dark:bg-slate-950 border border-warm-200 dark:border-slate-700 space-y-3">
                   <h5 class="font-bold text-slate-900 dark:text-white text-xs uppercase tracking-wider">Role & Security Tier</h5>
                   
                   <div class="space-y-2.5">
@@ -1405,7 +1405,7 @@
                 </div>
 
                 <!-- Section B: Administrative Password Reset -->
-                <div class="p-3.5 rounded-2xl bg-warm-50 dark:bg-slate-850 border border-warm-200 dark:border-slate-700 space-y-3">
+                <div class="p-3.5 rounded-2xl bg-warm-50 dark:bg-slate-950 border border-warm-200 dark:border-slate-700 space-y-3">
                   <div class="flex items-center justify-between">
                     <h5 class="font-bold text-slate-900 dark:text-white text-xs uppercase tracking-wider">Reset Temporary Password</h5>
                     <button
@@ -1442,7 +1442,7 @@
                 </div>
 
                 <!-- Section C: Account Freeze & Session Revocation -->
-                <div class="p-3.5 rounded-2xl bg-warm-50 dark:bg-slate-850 border border-warm-200 dark:border-slate-700 space-y-3">
+                <div class="p-3.5 rounded-2xl bg-warm-50 dark:bg-slate-950 border border-warm-200 dark:border-slate-700 space-y-3">
                   <h5 class="font-bold text-slate-900 dark:text-white text-xs uppercase tracking-wider">Access Lock & Session Controls</h5>
                   
                   {#if drawerTargetUser.status === 'ACTIVE'}

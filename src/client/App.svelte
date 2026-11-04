@@ -1150,7 +1150,7 @@
                           class={`work-card group relative w-full text-left p-3.5 rounded-xl border transition-colors duration-150 cursor-pointer ${meta.railClass} ${
                             isSelected
                               ? 'bg-orange-50/80 border-orange-400 dark:bg-orange-950/30 dark:border-orange-700 ring-2 ring-orange-600/50 dark:ring-orange-500/50'
-                              : 'bg-white hover:bg-warm-100/70 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-850 hover:border-warm-300 dark:hover:border-slate-700'
+                              : 'bg-white hover:bg-warm-100/70 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-800 hover:border-warm-300 dark:hover:border-slate-700'
                           }`}>
 
                           <div class="flex items-start justify-between gap-1">
@@ -1218,7 +1218,7 @@
           <div class="h-full overflow-auto overscroll-contain p-4 min-h-0">
             <table class="w-full text-left text-xs border-collapse">
               <thead>
-                <tr class="bg-warm-100 dark:bg-slate-850 border-b border-warm-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold">
+                <tr class="bg-warm-100 dark:bg-slate-900 border-b border-warm-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold">
                   <th class="p-2.5">ID</th>
                   <th class="p-2.5">Company & Industry</th>
                   <th class="p-2.5">Contact Person</th>
@@ -1240,7 +1240,7 @@
                     tabindex="0"
                     onclick={() => selectedLeadId = lead.id}
                     onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectedLeadId = lead.id; } }}
-                    class={`cursor-pointer transition ${isSelected ? 'bg-orange-50/70 dark:bg-orange-950/20' : 'hover:bg-warm-50 dark:hover:bg-slate-850'}`}>
+                    class={`cursor-pointer transition ${isSelected ? 'bg-orange-50/70 dark:bg-orange-950/20' : 'hover:bg-warm-50 dark:hover:bg-slate-800'}`}>
                     <td class="p-2.5 font-mono tabular-nums font-bold text-orange-700 dark:text-orange-400">{lead.id}</td>
                     <td class="p-2.5">
                       <div class="font-semibold text-slate-900 dark:text-white">{lead.company}</div>
@@ -1361,7 +1361,7 @@
         <!-- Inspector Body (Fits in one page, flex-1 flex-col overflow-hidden) -->
         <div class="p-3.5 flex-1 flex flex-col min-h-0 gap-3 overflow-hidden text-xs">
           <!-- Contact Dossier (Compact, shrink-0) -->
-          <div class="bg-warm-50 dark:bg-slate-850 p-2.5 rounded-lg border border-warm-200 dark:border-slate-800 shrink-0 space-y-1">
+          <div class="bg-warm-50 dark:bg-slate-900 p-2.5 rounded-lg border border-warm-200 dark:border-slate-800 shrink-0 space-y-1">
             <div class="font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
               <span>Contact Details</span>
               {#if selectedLead.contact_role}
@@ -1438,7 +1438,7 @@
                   <p class="text-[11px] mt-1">{emailDraft.policy_barrier_reason}</p>
                 </div>
               {:else}
-                <div class="flex-1 flex flex-col min-h-0 bg-warm-50/80 dark:bg-slate-850 p-2.5 rounded-lg border border-warm-200 dark:border-slate-800 overflow-hidden">
+                <div class="flex-1 flex flex-col min-h-0 bg-warm-50/80 dark:bg-slate-900 p-2.5 rounded-lg border border-warm-200 dark:border-slate-800 overflow-hidden">
                   <!-- Email Subject (shrink-0) -->
                   <div class="font-semibold text-slate-800 dark:text-slate-200 text-[11px] pb-1.5 border-b border-warm-200 dark:border-slate-750 shrink-0 truncate">
                     Subject: {emailDraft.subject}

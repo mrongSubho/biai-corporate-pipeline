@@ -149,11 +149,11 @@
         class="absolute bottom-full left-0 mb-2 w-72 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-2xl border border-warm-200 dark:border-slate-800 shadow-2xl p-1.5 z-50 text-xs font-sans animate-in fade-in zoom-in-95 duration-150">
         
         <!-- Header Info in Menu -->
-        <div class="p-3 bg-warm-50/70 dark:bg-slate-855/80 rounded-xl border border-warm-200/60 dark:border-slate-800/80 mb-1">
+        <div class="p-3 bg-warm-100/80 dark:bg-slate-950 rounded-xl border border-warm-200 dark:border-slate-800 mb-1">
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0 flex-1">
               <div class="font-semibold text-slate-900 dark:text-white truncate">{currentUser.full_name}</div>
-              <div class="text-[11px] font-mono text-slate-500 dark:text-slate-400 truncate mt-0.5">{currentUser.email}</div>
+              <div class="text-[11px] font-mono text-slate-600 dark:text-slate-300 truncate mt-0.5">{currentUser.email}</div>
             </div>
             <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase tracking-wider bg-orange-100 text-orange-800 dark:bg-orange-950/80 dark:text-orange-300 border border-orange-200 dark:border-orange-800 shrink-0">
               <Icon name="shield-check" size={10} class="text-orange-600 dark:text-orange-400" />
@@ -163,18 +163,18 @@
 
           <!-- Granted Scopes Strip -->
           {#if currentUser.scopes && currentUser.scopes.length > 0}
-            <div class="mt-2.5 pt-2 border-t border-warm-200/50 dark:border-slate-800/60">
+            <div class="mt-2.5 pt-2 border-t border-warm-200 dark:border-slate-800">
               <button
                 type="button"
                 onclick={() => showScopesExpanded = !showScopesExpanded}
-                class="flex items-center justify-between w-full text-[10px] font-mono text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition">
+                class="flex items-center justify-between w-full text-[10px] font-mono text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition">
                 <span>{currentUser.scopes.length} Permission Scopes</span>
                 <Icon name={showScopesExpanded ? 'chevron-up' : 'chevron-down'} size={12} />
               </button>
               {#if showScopesExpanded}
                 <div class="flex flex-wrap gap-1 mt-1.5 max-h-24 overflow-y-auto font-mono text-[9px]">
                   {#each currentUser.scopes as sc}
-                    <span class="px-1.5 py-0.5 rounded bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-warm-200 dark:border-slate-800">
+                    <span class="px-1.5 py-0.5 rounded bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border border-warm-200 dark:border-slate-800">
                       {sc}
                     </span>
                   {/each}
